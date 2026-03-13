@@ -226,6 +226,8 @@ pub struct SymbolData {
 pub struct CallEdgeData {
     pub id: String,
     pub from_symbol_id: String,
+    pub from_symbol_name: Option<String>,
+    pub from_symbol_file_path: Option<String>,
     pub target_name: String,
     pub to_symbol_id: Option<String>,
     pub call_type: String,
@@ -727,6 +729,31 @@ impl Database {
     }
 
     #[napi]
+    pub fn get_symbol_by_name(
+        &self,
+        name: String,
+        file_path: String,
+    ) -> Result<Option<SymbolData>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let row = db::get_symbol_by_name(&conn, &name, &file_path)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(row.map(|r| SymbolData {
+            id: r.id,
+            file_path: r.file_path,
+            name: r.name,
+            kind: r.kind,
+            start_line: r.start_line,
+            start_col: r.start_col,
+            end_line: r.end_line,
+            end_col: r.end_col,
+            language: r.language,
+        }))
+    }
+
+    #[napi]
     pub fn delete_symbols_by_file(&self, file_path: String) -> Result<u32> {
         let conn = self
             .conn
@@ -793,6 +820,8 @@ impl Database {
             .map(|r| CallEdgeData {
                 id: r.id,
                 from_symbol_id: r.from_symbol_id,
+                from_symbol_name: None,
+                from_symbol_file_path: None,
                 target_name: r.target_name,
                 to_symbol_id: r.to_symbol_id,
                 call_type: r.call_type,
@@ -816,6 +845,37 @@ impl Database {
             .map(|r| CallEdgeData {
                 id: r.id,
                 from_symbol_id: r.from_symbol_id,
+                from_symbol_name: None,
+                from_symbol_file_path: None,
+                target_name: r.target_name,
+                to_symbol_id: r.to_symbol_id,
+                call_type: r.call_type,
+                line: r.line,
+                col: r.col,
+                is_resolved: r.is_resolved,
+            })
+            .collect())
+    }
+
+    #[napi]
+    pub fn get_callers_with_context(
+        &self,
+        symbol_name: String,
+        branch: String,
+    ) -> Result<Vec<CallEdgeData>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let rows = db::get_callers_with_context(&conn, &symbol_name, &branch)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| CallEdgeData {
+                id: r.id,
+                from_symbol_id: r.from_symbol_id,
+                from_symbol_name: Some(r.from_symbol_name),
+                from_symbol_file_path: Some(r.from_symbol_file_path),
                 target_name: r.target_name,
                 to_symbol_id: r.to_symbol_id,
                 call_type: r.call_type,

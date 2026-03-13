@@ -13,7 +13,7 @@ pub enum DbError {
 pub type DbResult<T> = Result<T, DbError>;
 
 /// Schema version for migrations
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Maximum number of SQL bind parameters per query.
 /// SQLite defaults to 999 (SQLITE_MAX_VARIABLE_NUMBER). We use 900 to stay safely under.
@@ -29,7 +29,9 @@ pub fn init_db(db_path: &Path) -> DbResult<Connection> {
     let conn = Connection::open(db_path)?;
 
     // Enable WAL mode for better concurrent read performance
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys = ON;",
+    )?;
 
     let current_version: i32 = conn
         .query_row(
@@ -131,7 +133,7 @@ fn migrate_schema(conn: &Connection, from_version: i32) -> DbResult<()> {
                 line INTEGER NOT NULL,
                 col INTEGER NOT NULL,
                 is_resolved INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY (from_symbol_id) REFERENCES symbols(id)
+                FOREIGN KEY (from_symbol_id) REFERENCES symbols(id) ON DELETE CASCADE
             );
 
             -- Branch-symbol catalog: which symbols exist on which branch
@@ -158,6 +160,48 @@ fn migrate_schema(conn: &Connection, from_version: i32) -> DbResult<()> {
             params![SCHEMA_VERSION.to_string()],
         )?;
     }
+    if from_version >= 2 && from_version < 3 {
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+
+            BEGIN;
+
+            CREATE TABLE call_edges_new (
+                id TEXT PRIMARY KEY,
+                from_symbol_id TEXT NOT NULL,
+                target_name TEXT NOT NULL,
+                to_symbol_id TEXT,
+                call_type TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                col INTEGER NOT NULL,
+                is_resolved INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (from_symbol_id) REFERENCES symbols(id) ON DELETE CASCADE
+            );
+
+            INSERT INTO call_edges_new (id, from_symbol_id, target_name, to_symbol_id, call_type, line, col, is_resolved)
+            SELECT id, from_symbol_id, target_name, to_symbol_id, call_type, line, col, is_resolved
+            FROM call_edges;
+
+            DROP TABLE call_edges;
+            ALTER TABLE call_edges_new RENAME TO call_edges;
+
+            CREATE INDEX IF NOT EXISTS idx_call_edges_from ON call_edges(from_symbol_id);
+            CREATE INDEX IF NOT EXISTS idx_call_edges_to ON call_edges(to_symbol_id);
+            CREATE INDEX IF NOT EXISTS idx_call_edges_target_name ON call_edges(target_name);
+
+            COMMIT;
+
+            PRAGMA foreign_keys = ON;
+            "#,
+        )?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', ?)",
+            params![SCHEMA_VERSION.to_string()],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -612,6 +656,20 @@ pub struct CallEdgeRow {
     pub is_resolved: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct CallerRow {
+    pub id: String,
+    pub from_symbol_id: String,
+    pub from_symbol_name: String,
+    pub from_symbol_file_path: String,
+    pub target_name: String,
+    pub to_symbol_id: Option<String>,
+    pub call_type: String,
+    pub line: u32,
+    pub col: u32,
+    pub is_resolved: bool,
+}
+
 /// Insert or replace a symbol
 pub fn upsert_symbol(conn: &Connection, symbol: &SymbolRow) -> DbResult<()> {
     conn.execute(
@@ -699,7 +757,7 @@ pub fn get_symbols_by_file(conn: &Connection, file_path: &str) -> DbResult<Vec<S
 }
 
 /// Find a symbol by name and file path
-pub fn _get_symbol_by_name(
+pub fn get_symbol_by_name(
     conn: &Connection,
     name: &str,
     file_path: &str,
@@ -821,6 +879,53 @@ pub fn get_callers(
             line: row.get(5)?,
             col: row.get(6)?,
             is_resolved: row.get::<_, i32>(7)? != 0,
+        })
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+pub fn get_callers_with_context(
+    conn: &Connection,
+    symbol_name: &str,
+    branch: &str,
+) -> DbResult<Vec<CallerRow>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            ce.id,
+            ce.from_symbol_id,
+            s.name,
+            s.file_path,
+            ce.target_name,
+            ce.to_symbol_id,
+            ce.call_type,
+            ce.line,
+            ce.col,
+            ce.is_resolved
+        FROM call_edges ce
+        INNER JOIN symbols s ON ce.from_symbol_id = s.id
+        INNER JOIN branch_symbols bs ON s.id = bs.symbol_id AND bs.branch = ?
+        WHERE ce.target_name = ?
+        "#,
+    )?;
+
+    let rows = stmt.query_map(params![branch, symbol_name], |row| {
+        Ok(CallerRow {
+            id: row.get(0)?,
+            from_symbol_id: row.get(1)?,
+            from_symbol_name: row.get(2)?,
+            from_symbol_file_path: row.get(3)?,
+            target_name: row.get(4)?,
+            to_symbol_id: row.get(5)?,
+            call_type: row.get(6)?,
+            line: row.get(7)?,
+            col: row.get(8)?,
+            is_resolved: row.get::<_, i32>(9)? != 0,
         })
     })?;
 
@@ -1109,7 +1214,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "2");
+        assert_eq!(version, "3");
     }
 
     #[test]
@@ -1232,12 +1337,12 @@ mod tests {
         assert_eq!(symbols[0].start_line, 10);
 
         // Get by name
-        let found = _get_symbol_by_name(&conn, "handleRequest", "src/main.ts").unwrap();
+        let found = get_symbol_by_name(&conn, "handleRequest", "src/main.ts").unwrap();
         assert!(found.is_some());
         assert_eq!(found.unwrap().id, "sym1");
 
         // Not found
-        let missing = _get_symbol_by_name(&conn, "missing", "src/main.ts").unwrap();
+        let missing = get_symbol_by_name(&conn, "missing", "src/main.ts").unwrap();
         assert!(missing.is_none());
 
         // Delete by file
@@ -1528,5 +1633,138 @@ mod tests {
         let stats = get_stats(&conn).unwrap();
         assert_eq!(stats.symbol_count, 1);
         assert_eq!(stats.call_edge_count, 1);
+    }
+
+    #[test]
+    fn test_migration_v3_adds_cascade_on_call_edges() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("migration-v2.db");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE symbols (
+                    id TEXT PRIMARY KEY,
+                    file_path TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    start_col INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    end_col INTEGER NOT NULL,
+                    language TEXT NOT NULL
+                );
+                CREATE TABLE call_edges (
+                    id TEXT PRIMARY KEY,
+                    from_symbol_id TEXT NOT NULL,
+                    target_name TEXT NOT NULL,
+                    to_symbol_id TEXT,
+                    call_type TEXT NOT NULL,
+                    line INTEGER NOT NULL,
+                    col INTEGER NOT NULL,
+                    is_resolved INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (from_symbol_id) REFERENCES symbols(id)
+                );
+                CREATE INDEX idx_call_edges_from ON call_edges(from_symbol_id);
+                CREATE INDEX idx_call_edges_to ON call_edges(to_symbol_id);
+                CREATE INDEX idx_call_edges_target_name ON call_edges(target_name);
+                INSERT INTO metadata (key, value) VALUES ('schema_version', '2');
+                "#,
+            )
+            .unwrap();
+        }
+
+        let conn = init_db(&db_path).unwrap();
+
+        let schema_version: String = conn
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(schema_version, "3");
+
+        let on_delete: String = conn
+            .query_row("PRAGMA foreign_key_list(call_edges)", [], |row| row.get(6))
+            .unwrap();
+        assert_eq!(on_delete.to_uppercase(), "CASCADE");
+    }
+
+    #[test]
+    fn test_foreign_keys_enabled_by_default() {
+        let (_temp_dir, conn) = setup_test_db();
+        let enabled: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn test_cascade_deletes_call_edges_when_symbol_deleted() {
+        let (_temp_dir, mut conn) = setup_test_db();
+
+        let symbols = vec![
+            SymbolRow {
+                id: "sym_caller".to_string(),
+                file_path: "src/main.ts".to_string(),
+                name: "main".to_string(),
+                kind: "function".to_string(),
+                start_line: 1,
+                start_col: 0,
+                end_line: 10,
+                end_col: 1,
+                language: "typescript".to_string(),
+            },
+            SymbolRow {
+                id: "sym_target".to_string(),
+                file_path: "src/main.ts".to_string(),
+                name: "target".to_string(),
+                kind: "function".to_string(),
+                start_line: 12,
+                start_col: 0,
+                end_line: 20,
+                end_col: 1,
+                language: "typescript".to_string(),
+            },
+        ];
+        upsert_symbols_batch(&mut conn, &symbols).unwrap();
+        add_symbols_to_branch(
+            &conn,
+            "main",
+            &["sym_caller".to_string(), "sym_target".to_string()],
+        )
+        .unwrap();
+
+        let edge = CallEdgeRow {
+            id: "edge_cascade".to_string(),
+            from_symbol_id: "sym_caller".to_string(),
+            target_name: "target".to_string(),
+            to_symbol_id: None,
+            call_type: "Call".to_string(),
+            line: 5,
+            col: 2,
+            is_resolved: false,
+        };
+        upsert_call_edge(&conn, &edge).unwrap();
+        let before = get_callees(&conn, "sym_caller", "main").unwrap();
+        assert_eq!(before.len(), 1);
+
+        let deleted = delete_symbols_by_file(&conn, "src/main.ts").unwrap();
+        assert_eq!(deleted, 2);
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM call_edges WHERE id = 'edge_cascade'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }

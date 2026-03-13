@@ -115,6 +115,8 @@ export interface SymbolData {
 export interface CallEdgeData {
   id: string;
   fromSymbolId: string;
+  fromSymbolName?: string;
+  fromSymbolFilePath?: string;
   targetName: string;
   toSymbolId?: string;
   callType: string;
@@ -704,6 +706,10 @@ export class Database {
     return this.inner.getSymbolsByFile(filePath);
   }
 
+  getSymbolByName(name: string, filePath: string): SymbolData | null {
+    return this.inner.getSymbolByName(name, filePath) ?? null;
+  }
+
   deleteSymbolsByFile(filePath: string): number {
     return this.inner.deleteSymbolsByFile(filePath);
   }
@@ -721,6 +727,10 @@ export class Database {
 
   getCallers(targetName: string, branch: string): CallEdgeData[] {
     return this.inner.getCallers(targetName, branch);
+  }
+
+  getCallersWithContext(targetName: string, branch: string): CallEdgeData[] {
+    return this.inner.getCallersWithContext(targetName, branch);
   }
 
   getCallees(symbolId: string, branch: string): CallEdgeData[] {

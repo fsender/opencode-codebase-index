@@ -4,7 +4,7 @@
 
 Semantic codebase indexing plugin for OpenCode. Hybrid TypeScript/Rust architecture:
 - **TypeScript** (`src/`): Plugin logic, embedding providers, OpenCode tools
-- **Rust** (`native/`): Tree-sitter parsing, usearch vectors, SQLite storage, BM25 inverted index
+- **Rust** (`native/`): Tree-sitter parsing, usearch vectors, SQLite storage, BM25 inverted index, call graph extraction
 
 ## Build/Test/Lint
 
@@ -52,10 +52,11 @@ native/src/
 ├── parser.rs             # Tree-sitter parsing (14 languages: TS, JS, Python, Rust, Go, Java, C#, Ruby, Bash, C, C++, JSON, TOML, YAML)
 ├── chunker.rs            # Semantic chunking with overlap
 ├── store.rs              # usearch vector store (F16 quantization)
-├── db.rs                 # SQLite: embeddings, chunks, branch catalog
+├── db.rs                 # SQLite: embeddings, chunks, branch catalog, symbols, call edges
+├── call_extractor.rs     # Tree-sitter query-based call extraction (TS/JS, Python, Go, Rust)
 ├── inverted_index.rs     # BM25 keyword search
 ├── hasher.rs             # xxhash content hashing
-└── types.rs              # Shared types
+└── types.rs              # Shared types (Language enum with from_string)
 
 tests/                    # Vitest tests (30s timeout for native ops)
 commands/                 # Slash command definitions (/search, /find, /index)
@@ -75,6 +76,8 @@ skill/                    # OpenCode skill guidance
 | Add slash command | `commands/` + register in `src/index.ts` config() |
 
 | Add/modify MCP tool | `src/mcp-server.ts` (createMcpServer) |
+| Modify call graph extraction | `native/src/call_extractor.rs` + query files in `native/queries/` |
+| Add call graph language | `native/queries/<lang>-calls.scm` + update `call_extractor.rs` |
 ## CODE MAP
 
 ### TypeScript Exports (`src/index.ts`)
@@ -89,12 +92,13 @@ skill/                    # OpenCode skill guidance
 | `index_health_check` | Tool | GC orphaned embeddings/chunks |
 | `index_metrics` | Tool | Get performance metrics (requires debug.enabled + debug.metrics) |
 | `index_logs` | Tool | Get debug logs (requires debug.enabled) |
+| `call_graph` | Tool | Query call graph for callers/callees of functions |
 
 
 ### MCP Server Exports (`src/mcp-server.ts`)
 | Symbol | Type | Purpose |
 |--------|------|---------|
-| `createMcpServer` | fn | Creates MCP Server with 8 tools + 4 prompts, lazy Indexer init |
+| `createMcpServer` | fn | Creates MCP Server with 9 tools + 4 prompts, lazy Indexer init |
 
 ### CLI Entry (`src/cli.ts`)
 | Symbol | Type | Purpose |
@@ -218,6 +222,7 @@ afterEach(() => { fs.rmSync(tempDir, { recursive: true, force: true }); });
 | `logger.test.ts` | Logger utility, metrics collection |
 
 | `mcp-server.test.ts` | MCP server: tool/prompt registration, execution via InMemoryTransport |
+| `call-graph.test.ts` | Call extraction, storage, resolution, branch awareness, integration |
 ### Benchmarks
 ```bash
 npx tsx benchmarks/run.ts   # Performance testing for native operations

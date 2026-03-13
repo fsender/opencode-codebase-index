@@ -784,6 +784,13 @@ export class Indexer {
         allSymbolIds.add(symbolId);
       }
 
+      const symbolsByName = new Map<string, SymbolData[]>();
+      for (const symbol of fileSymbols) {
+        const existing = symbolsByName.get(symbol.name) ?? [];
+        existing.push(symbol);
+        symbolsByName.set(symbol.name, existing);
+      }
+
       if (fileSymbols.length > 0) {
         database.upsertSymbolsBatch(fileSymbols);
         symbolsByFile.set(parsed.path, fileSymbols);
@@ -810,6 +817,7 @@ export class Indexer {
           id: edgeId,
           fromSymbolId: enclosingSymbol.id,
           targetName: site.calleeName,
+          toSymbolId: undefined,
           callType: site.callType,
           line: site.line,
           col: site.column,
@@ -822,9 +830,9 @@ export class Indexer {
 
         // Resolve same-file calls
         for (const edge of edges) {
-          const matchingSymbol = fileSymbols.find((sym) => sym.name === edge.targetName);
-          if (matchingSymbol) {
-            database.resolveCallEdge(edge.id, matchingSymbol.id);
+          const candidates = symbolsByName.get(edge.targetName);
+          if (candidates && candidates.length === 1) {
+            database.resolveCallEdge(edge.id, candidates[0].id);
           }
         }
       }
@@ -1693,7 +1701,7 @@ export class Indexer {
 
   async getCallers(targetName: string): Promise<CallEdgeData[]> {
     const { database } = await this.ensureInitialized();
-    return database.getCallers(targetName, this.currentBranch);
+    return database.getCallersWithContext(targetName, this.currentBranch);
   }
 
   async getCallees(symbolId: string): Promise<CallEdgeData[]> {

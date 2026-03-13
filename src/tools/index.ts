@@ -4,6 +4,7 @@ import { Indexer } from "../indexer/index.js";
 import { ParsedCodebaseIndexConfig } from "../config/schema.js";
 import { formatCostEstimate } from "../utils/cost.js";
 import type { LogLevel } from "../config/schema.js";
+import type { LogEntry } from "../utils/logger.js";
 import {
   formatProgressTitle,
   formatIndexStats,
@@ -149,7 +150,7 @@ export const index_logs: ToolDefinition = tool({
       return "Debug mode is disabled. Enable it in your config:\n\n```json\n{\n  \"debug\": {\n    \"enabled\": true\n  }\n}\n```";
     }
 
-    let logs;
+    let logs: LogEntry[];
     if (args.category) {
       logs = logger.getLogsByCategory(args.category, args.limit);
     } else if (args.level) {
@@ -246,7 +247,7 @@ export const call_graph: ToolDefinition = tool({
       return `No callers found for "${args.name}". It may not be called by any tracked function, or the index needs updating.`;
     }
     const formatted = callers.map((e, i) =>
-      `[${i + 1}] \u2190 from symbol ${e.fromSymbolId} (${e.callType}) at line ${e.line}${e.isResolved ? " [resolved]" : " [unresolved]"}`
+      `[${i + 1}] \u2190 from ${e.fromSymbolName ?? "<unknown>"} in ${e.fromSymbolFilePath ?? "<unknown file>"} [${e.fromSymbolId}] (${e.callType}) at line ${e.line}${e.isResolved ? " [resolved]" : " [unresolved]"}`
     );
     return `"${args.name}" is called by ${callers.length} function(s):\n\n${formatted.join("\n")}`;
   },

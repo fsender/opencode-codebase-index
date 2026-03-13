@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Indexer, type IndexStats } from "./indexer/index.js";
 import type { ParsedCodebaseIndexConfig, LogLevel } from "./config/schema.js";
 import { formatCostEstimate } from "./utils/cost.js";
+import type { LogEntry } from "./utils/logger.js";
 
 const MAX_CONTENT_LINES = 30;
 
@@ -303,7 +304,7 @@ export function createMcpServer(projectRoot: string, config: ParsedCodebaseIndex
         return { content: [{ type: "text", text: "Debug mode is disabled. Enable it in your config:\n\n```json\n{\n  \"debug\": {\n    \"enabled\": true\n  }\n}\n```" }] };
       }
 
-      let logs;
+      let logs: LogEntry[];
       if (args.category) {
         logs = logger.getLogsByCategory(args.category, args.limit);
       } else if (args.level) {
@@ -389,7 +390,7 @@ export function createMcpServer(projectRoot: string, config: ParsedCodebaseIndex
         return { content: [{ type: "text", text: `No callers found for "${args.name}".` }] };
       }
       const formatted = callers.map((e, i) =>
-        `[${i + 1}] \u2190 from symbol ${e.fromSymbolId} (${e.callType}) at line ${e.line}${e.isResolved ? " [resolved]" : " [unresolved]"}`
+        `[${i + 1}] \u2190 from ${e.fromSymbolName ?? "<unknown>"} in ${e.fromSymbolFilePath ?? "<unknown file>"} [${e.fromSymbolId}] (${e.callType}) at line ${e.line}${e.isResolved ? " [resolved]" : " [unresolved]"}`
       );
       return { content: [{ type: "text", text: `"${args.name}" is called by ${callers.length} function(s):\n\n${formatted.join("\n")}` }] };
     },

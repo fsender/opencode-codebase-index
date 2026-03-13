@@ -53,3 +53,7 @@ test-*.mjs
 
 # Benchmark results
 benchmark-results/
+
+# Local agent/session artifacts
+.sisyphus/
+.superset/

@@ -29,6 +29,9 @@ export interface SearchConfig {
   minScore: number;
   includeContext: boolean;
   hybridWeight: number;
+  fusionStrategy: "weighted" | "rrf";
+  rrfK: number;
+  rerankTopN: number;
   contextLines: number;
 }
 
@@ -105,8 +108,15 @@ function getDefaultSearchConfig(): SearchConfig {
     minScore: 0.1,
     includeContext: true,
     hybridWeight: 0.5,
+    fusionStrategy: "rrf",
+    rrfK: 60,
+    rerankTopN: 20,
     contextLines: 0,
   };
+}
+
+function isValidFusionStrategy(value: unknown): value is SearchConfig["fusionStrategy"] {
+  return value === "weighted" || value === "rrf";
 }
 
 function getDefaultDebugConfig(): DebugConfig {
@@ -176,6 +186,9 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
     minScore: typeof rawSearch.minScore === "number" ? rawSearch.minScore : defaultSearch.minScore,
     includeContext: typeof rawSearch.includeContext === "boolean" ? rawSearch.includeContext : defaultSearch.includeContext,
     hybridWeight: typeof rawSearch.hybridWeight === "number" ? Math.min(1, Math.max(0, rawSearch.hybridWeight)) : defaultSearch.hybridWeight,
+    fusionStrategy: isValidFusionStrategy(rawSearch.fusionStrategy) ? rawSearch.fusionStrategy : defaultSearch.fusionStrategy,
+    rrfK: typeof rawSearch.rrfK === "number" ? Math.max(1, Math.floor(rawSearch.rrfK)) : defaultSearch.rrfK,
+    rerankTopN: typeof rawSearch.rerankTopN === "number" ? Math.min(200, Math.max(0, Math.floor(rawSearch.rerankTopN))) : defaultSearch.rerankTopN,
     contextLines: typeof rawSearch.contextLines === "number" ? Math.min(50, Math.max(0, rawSearch.contextLines)) : defaultSearch.contextLines,
   };
 

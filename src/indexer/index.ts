@@ -153,6 +153,21 @@ interface FailedBatch {
   lastAttempt: string;
 }
 
+type RankedCandidate = { id: string; score: number; metadata: ChunkMetadata };
+
+interface HybridRankOptions {
+  fusionStrategy: "weighted" | "rrf";
+  rrfK: number;
+  rerankTopN: number;
+  limit: number;
+  hybridWeight: number;
+}
+
+interface SemanticRankOptions {
+  rerankTopN: number;
+  limit: number;
+}
+
 interface IndexMetadata {
   indexVersion: string;
   embeddingProvider: string;
@@ -175,6 +190,195 @@ interface IndexCompatibility {
 }
 
 const INDEX_METADATA_VERSION = "1";
+
+function tokenizeForRanking(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, " ")
+      .split(/\s+/)
+      .filter((token) => token.length > 1)
+  );
+}
+
+function splitPathTokens(filePath: string): Set<string> {
+  const normalized = filePath
+    .toLowerCase()
+    .replace(/[^a-z0-9/._-]/g, " ")
+    .split(/[/._-]+/)
+    .filter((token) => token.length > 1);
+  return new Set(normalized);
+}
+
+function chunkTypeBoost(chunkType: string): number {
+  if (["function", "function_declaration", "method", "method_definition", "class", "class_declaration"].includes(chunkType)) {
+    return 0.2;
+  }
+  if (["interface", "type", "enum", "struct", "impl", "trait", "module"].includes(chunkType)) {
+    return 0.1;
+  }
+  return 0;
+}
+
+export function fuseResultsWeighted(
+  semanticResults: RankedCandidate[],
+  keywordResults: RankedCandidate[],
+  keywordWeight: number,
+  limit: number
+): RankedCandidate[] {
+  const semanticWeight = 1 - keywordWeight;
+  const fusedScores = new Map<string, { score: number; metadata: ChunkMetadata }>();
+
+  for (const r of semanticResults) {
+    fusedScores.set(r.id, {
+      score: r.score * semanticWeight,
+      metadata: r.metadata,
+    });
+  }
+
+  for (const r of keywordResults) {
+    const existing = fusedScores.get(r.id);
+    if (existing) {
+      existing.score += r.score * keywordWeight;
+    } else {
+      fusedScores.set(r.id, {
+        score: r.score * keywordWeight,
+        metadata: r.metadata,
+      });
+    }
+  }
+
+  const results = Array.from(fusedScores.entries()).map(([id, data]) => ({
+    id,
+    score: data.score,
+    metadata: data.metadata,
+  }));
+
+  results.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  return results.slice(0, limit);
+}
+
+export function fuseResultsRrf(
+  semanticResults: RankedCandidate[],
+  keywordResults: RankedCandidate[],
+  rrfK: number,
+  limit: number
+): RankedCandidate[] {
+  const rankByIdSemantic = new Map<string, number>();
+  const rankByIdKeyword = new Map<string, number>();
+  const metadataById = new Map<string, ChunkMetadata>();
+
+  semanticResults.forEach((result, index) => {
+    rankByIdSemantic.set(result.id, index + 1);
+    metadataById.set(result.id, result.metadata);
+  });
+
+  keywordResults.forEach((result, index) => {
+    rankByIdKeyword.set(result.id, index + 1);
+    if (!metadataById.has(result.id)) {
+      metadataById.set(result.id, result.metadata);
+    }
+  });
+
+  const allIds = new Set<string>([...rankByIdSemantic.keys(), ...rankByIdKeyword.keys()]);
+  const fused: RankedCandidate[] = [];
+
+  for (const id of allIds) {
+    const semanticRank = rankByIdSemantic.get(id);
+    const keywordRank = rankByIdKeyword.get(id);
+
+    const semanticScore = semanticRank ? 1 / (rrfK + semanticRank) : 0;
+    const keywordScore = keywordRank ? 1 / (rrfK + keywordRank) : 0;
+
+    const metadata = metadataById.get(id);
+    if (!metadata) continue;
+
+    fused.push({
+      id,
+      score: semanticScore + keywordScore,
+      metadata,
+    });
+  }
+
+  fused.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  return fused.slice(0, limit);
+}
+
+export function rerankResults(
+  query: string,
+  candidates: RankedCandidate[],
+  rerankTopN: number
+): RankedCandidate[] {
+  if (rerankTopN <= 0 || candidates.length <= 1) {
+    return candidates;
+  }
+
+  const topN = Math.min(rerankTopN, candidates.length);
+  const queryTokens = tokenizeForRanking(query);
+  const head = candidates.slice(0, topN).map((candidate, idx) => {
+    const pathTokens = splitPathTokens(candidate.metadata.filePath);
+    const nameTokens = tokenizeForRanking(candidate.metadata.name ?? "");
+    let exactOrPrefixNameHits = 0;
+    let pathOverlap = 0;
+
+    for (const token of queryTokens) {
+      for (const nameToken of nameTokens) {
+        if (nameToken === token || nameToken.startsWith(token) || token.startsWith(nameToken)) {
+          exactOrPrefixNameHits += 1;
+          break;
+        }
+      }
+      if (pathTokens.has(token)) {
+        pathOverlap += 1;
+      }
+    }
+
+    const deterministicBoost =
+      exactOrPrefixNameHits * 0.08 +
+      pathOverlap * 0.03 +
+      chunkTypeBoost(candidate.metadata.chunkType);
+
+    return {
+      candidate,
+      boostedScore: candidate.score + deterministicBoost,
+      originalIndex: idx,
+    };
+  });
+
+  head.sort((a, b) => {
+    if (b.boostedScore !== a.boostedScore) return b.boostedScore - a.boostedScore;
+    if (b.candidate.score !== a.candidate.score) return b.candidate.score - a.candidate.score;
+    if (a.originalIndex !== b.originalIndex) return a.originalIndex - b.originalIndex;
+    return a.candidate.id.localeCompare(b.candidate.id);
+  });
+
+  const tail = candidates.slice(topN);
+  return [...head.map((entry) => entry.candidate), ...tail];
+}
+
+export function rankHybridResults(
+  query: string,
+  semanticResults: RankedCandidate[],
+  keywordResults: RankedCandidate[],
+  options: HybridRankOptions
+): RankedCandidate[] {
+  const overfetchLimit = Math.max(options.limit * 4, options.limit);
+  const fused = options.fusionStrategy === "rrf"
+    ? fuseResultsRrf(semanticResults, keywordResults, options.rrfK, overfetchLimit)
+    : fuseResultsWeighted(semanticResults, keywordResults, options.hybridWeight, overfetchLimit);
+
+  return rerankResults(query, fused, options.rerankTopN);
+}
+
+export function rankSemanticOnlyResults(
+  query: string,
+  semanticResults: RankedCandidate[],
+  options: SemanticRankOptions
+): RankedCandidate[] {
+  const overfetchLimit = Math.max(options.limit * 2, options.limit);
+  const bounded = semanticResults.slice(0, overfetchLimit);
+  return rerankResults(query, bounded, options.rerankTopN);
+}
 
 export class Indexer {
   private config: ParsedCodebaseIndexConfig;
@@ -1260,12 +1464,18 @@ export class Indexer {
 
     const maxResults = limit ?? this.config.search.maxResults;
     const hybridWeight = options?.hybridWeight ?? this.config.search.hybridWeight;
+    const fusionStrategy = this.config.search.fusionStrategy;
+    const rrfK = this.config.search.rrfK;
+    const rerankTopN = this.config.search.rerankTopN;
     const filterByBranch = options?.filterByBranch ?? true;
 
     this.logger.search("debug", "Starting search", {
       query,
       maxResults,
       hybridWeight,
+      fusionStrategy,
+      rrfK,
+      rerankTopN,
       filterByBranch,
     });
 
@@ -1282,7 +1492,13 @@ export class Indexer {
     const keywordMs = performance.now() - keywordStartTime;
 
     const fusionStartTime = performance.now();
-    const combined = this.fuseResults(semanticResults, keywordResults, hybridWeight, maxResults * 4);
+    const combined = rankHybridResults(query, semanticResults, keywordResults, {
+      fusionStrategy,
+      rrfK,
+      rerankTopN,
+      limit: maxResults,
+      hybridWeight,
+    });
     const fusionMs = performance.now() - fusionStartTime;
 
     let branchChunkIds: Set<string> | null = null;
@@ -1394,44 +1610,6 @@ export class Indexer {
         results.push({ id: chunkId, score, metadata });
       }
     }
-
-    results.sort((a, b) => b.score - a.score);
-    return results.slice(0, limit);
-  }
-
-  private fuseResults(
-    semanticResults: Array<{ id: string; score: number; metadata: ChunkMetadata }>,
-    keywordResults: Array<{ id: string; score: number; metadata: ChunkMetadata }>,
-    keywordWeight: number,
-    limit: number
-  ): Array<{ id: string; score: number; metadata: ChunkMetadata }> {
-    const semanticWeight = 1 - keywordWeight;
-    const fusedScores = new Map<string, { score: number; metadata: ChunkMetadata }>();
-
-    for (const r of semanticResults) {
-      fusedScores.set(r.id, {
-        score: r.score * semanticWeight,
-        metadata: r.metadata,
-      });
-    }
-
-    for (const r of keywordResults) {
-      const existing = fusedScores.get(r.id);
-      if (existing) {
-        existing.score += r.score * keywordWeight;
-      } else {
-        fusedScores.set(r.id, {
-          score: r.score * keywordWeight,
-          metadata: r.metadata,
-        });
-      }
-    }
-
-    const results = Array.from(fusedScores.entries()).map(([id, data]) => ({
-      id,
-      score: data.score,
-      metadata: data.metadata,
-    }));
 
     results.sort((a, b) => b.score - a.score);
     return results.slice(0, limit);
@@ -1668,13 +1846,19 @@ export class Indexer {
     const vectorStartTime = performance.now();
     const semanticResults = store.search(embedding, limit * 2);
     const vectorMs = performance.now() - vectorStartTime;
+    const rerankTopN = this.config.search.rerankTopN;
+
+    const ranked = rankSemanticOnlyResults(code, semanticResults, {
+      rerankTopN,
+      limit,
+    });
 
     let branchChunkIds: Set<string> | null = null;
     if (filterByBranch && this.currentBranch !== "default") {
       branchChunkIds = new Set(database.getBranchChunkIds(this.currentBranch));
     }
 
-    const filtered = semanticResults.filter((r) => {
+    const filtered = ranked.filter((r) => {
       if (r.score < this.config.search.minScore) return false;
 
       if (branchChunkIds && !branchChunkIds.has(r.id)) return false;

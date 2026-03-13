@@ -202,6 +202,9 @@ describe("config schema", () => {
             minScore: 0.2,
             includeContext: false,
             hybridWeight: 0.7,
+            fusionStrategy: "weighted",
+            rrfK: 80,
+            rerankTopN: 12,
             contextLines: 10,
           },
         });
@@ -210,7 +213,32 @@ describe("config schema", () => {
         expect(config.search.minScore).toBe(0.2);
         expect(config.search.includeContext).toBe(false);
         expect(config.search.hybridWeight).toBe(0.7);
+        expect(config.search.fusionStrategy).toBe("weighted");
+        expect(config.search.rrfK).toBe(80);
+        expect(config.search.rerankTopN).toBe(12);
         expect(config.search.contextLines).toBe(10);
+      });
+
+      it("should use default search ranking config values", () => {
+        const config = parseConfig({});
+        expect(config.search.fusionStrategy).toBe("rrf");
+        expect(config.search.rrfK).toBe(60);
+        expect(config.search.rerankTopN).toBe(20);
+      });
+
+      it("should fallback fusionStrategy to default for invalid values", () => {
+        const config = parseConfig({ search: { fusionStrategy: "invalid" } });
+        expect(config.search.fusionStrategy).toBe("rrf");
+      });
+
+      it("should clamp rrfK and rerankTopN bounds", () => {
+        expect(parseConfig({ search: { rrfK: 0 } }).search.rrfK).toBe(1);
+        expect(parseConfig({ search: { rrfK: -10 } }).search.rrfK).toBe(1);
+        expect(parseConfig({ search: { rrfK: 25.7 } }).search.rrfK).toBe(25);
+
+        expect(parseConfig({ search: { rerankTopN: -1 } }).search.rerankTopN).toBe(0);
+        expect(parseConfig({ search: { rerankTopN: 999 } }).search.rerankTopN).toBe(200);
+        expect(parseConfig({ search: { rerankTopN: 10.9 } }).search.rerankTopN).toBe(10);
       });
 
       it("should clamp hybridWeight to 0-1 range", () => {

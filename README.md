@@ -158,10 +158,11 @@ graph TD
     Q[User Query] -->|Embedding Model| V[Query Vector]
     V -->|Cosine Similarity| D
     Q -->|BM25| E
-    G -->|Branch Filter| F
-    D --> F[Hybrid Fusion]
+    D --> F[Hybrid Fusion RRF/Weighted]
     E --> F
-    F --> R[Ranked Results]
+    F --> X[Deterministic Rerank]
+    G -->|Branch + Metadata Filters| X
+    X --> R[Ranked Results]
     end
 ```
 
@@ -171,7 +172,7 @@ graph TD
 2. **Chunking**: Large blocks are split with overlapping windows to preserve context across chunk boundaries.
 3. **Embedding**: These blocks are converted into vector representations using your configured AI provider.
 4. **Storage**: Embeddings are stored in SQLite (deduplicated by content hash) and vectors in `usearch` with F16 quantization for 50% memory savings. A branch catalog tracks which chunks exist on each branch.
-5. **Hybrid Search**: Combines semantic similarity (vectors) with BM25 keyword matching, filtered by current branch.
+5. **Hybrid Search**: Combines semantic similarity (vectors) with BM25 keyword matching, fuses (`rrf` default, `weighted` fallback), applies deterministic rerank, then filters by current branch/metadata.
 
 **Performance characteristics:**
 - **Incremental indexing**: ~50ms check time — only re-embeds changed files
@@ -226,6 +227,7 @@ The plugin exposes these tools to the OpenCode agent:
 **The primary tool.** Searches code by describing behavior.
 - **Use for**: Discovery, understanding flows, finding logic when you don't know the names.
 - **Example**: `"find the middleware that sanitizes input"`
+- **Ranking path**: hybrid retrieval → fusion (`search.fusionStrategy`) → deterministic rerank (`search.rerankTopN`) → filters
 
 **Writing good queries:**
 
@@ -240,6 +242,7 @@ The plugin exposes these tools to the OpenCode agent:
 ### `codebase_peek`
 **Token-efficient discovery.** Returns only metadata (file, line, name, type) without code content.
 - **Use for**: Finding WHERE code is before deciding what to read. Saves ~90% tokens vs `codebase_search`.
+- **Ranking path**: same hybrid ranking path as `codebase_search` (metadata-only output)
 - **Example output**:
   ```
   [1] function "validatePayment" at src/billing.ts:45-67 (score: 0.92)
@@ -248,6 +251,11 @@ The plugin exposes these tools to the OpenCode agent:
   Use Read tool to examine specific files.
   ```
 - **Workflow**: `codebase_peek` → find locations → `Read` specific files
+
+### `find_similar`
+Find code similar to a provided snippet.
+- **Use for**: Duplicate detection, refactor prep, pattern mining.
+- **Ranking path**: semantic retrieval only + deterministic rerank (no BM25, no RRF).
 
 ### `index_codebase`
 Manually trigger indexing.
@@ -308,6 +316,9 @@ Zero-config by default (uses `auto` mode). Customize in `.opencode/codebase-inde
     "maxResults": 20,
     "minScore": 0.1,
     "hybridWeight": 0.5,
+    "fusionStrategy": "rrf",
+    "rrfK": 60,
+    "rerankTopN": 20,
     "contextLines": 0
   },
   "debug": {
@@ -340,6 +351,9 @@ Zero-config by default (uses `auto` mode). Customize in `.opencode/codebase-inde
 | `maxResults` | `20` | Maximum results to return |
 | `minScore` | `0.1` | Minimum similarity score (0-1). Lower = more results |
 | `hybridWeight` | `0.5` | Balance between keyword (1.0) and semantic (0.0) search |
+| `fusionStrategy` | `"rrf"` | Hybrid fusion mode: `"rrf"` (rank-based reciprocal rank fusion) or `"weighted"` (legacy score blending fallback) |
+| `rrfK` | `60` | RRF smoothing constant. Higher values flatten rank impact, lower values prioritize top-ranked candidates more strongly |
+| `rerankTopN` | `20` | Deterministic rerank depth cap. Applies lightweight name/path/chunk-type rerank to top-N only |
 | `contextLines` | `0` | Extra lines to include before/after each match |
 | **debug** | | |
 | `enabled` | `false` | Enable debug logging and metrics collection |
@@ -350,6 +364,15 @@ Zero-config by default (uses `auto` mode). Customize in `.opencode/codebase-inde
 | `logGc` | `true` | Log garbage collection operations |
 | `logBranch` | `true` | Log branch detection and switches |
 | `metrics` | `false` | Enable metrics collection (indexing stats, search timing, cache performance) |
+
+### Retrieval ranking behavior (Phase 1)
+
+- `codebase_search` and `codebase_peek` use the hybrid path: semantic + keyword retrieval → fusion (`fusionStrategy`) → deterministic rerank (`rerankTopN`) → filtering.
+- `find_similar` stays semantic-only: semantic retrieval + deterministic rerank only (no keyword retrieval, no RRF).
+- For compatibility rollbacks, set `search.fusionStrategy` to `"weighted"` to use the legacy weighted fusion path.
+- Retrieval benchmark artifacts are separated by role:
+  - baseline (versioned): `benchmarks/baselines/retrieval-baseline.json`
+  - latest candidate run (generated): `benchmark-results/retrieval-candidate.json`
 
 ### Embedding Providers
 The plugin automatically detects available credentials in this order:

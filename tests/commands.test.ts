@@ -180,10 +180,15 @@ Final line.`;
       expect(commands.has("search")).toBe(true);
       expect(commands.has("index")).toBe(true);
       expect(commands.has("find")).toBe(true);
+      expect(commands.has("call-graph")).toBe(true);
 
       const indexCmd = commands.get("index")!;
       expect(indexCmd.description).toBe("Index the codebase for semantic search");
       expect(indexCmd.template).toContain("index_codebase");
+
+      const callGraphCmd = commands.get("call-graph")!;
+      expect(callGraphCmd.description).toBe("Trace callers or callees using the call graph");
+      expect(callGraphCmd.template).toContain("call_graph");
     });
   });
 });

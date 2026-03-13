@@ -32,7 +32,28 @@ import type { SymbolData, CallEdgeData } from "../native/index.js";
 import { getBranchOrDefault, getBaseBranch, isGitRepo } from "../git/index.js";
 
 const CALL_GRAPH_LANGUAGES = new Set(["typescript", "tsx", "javascript", "jsx", "python", "go", "rust"]);
-const SEMANTIC_CHUNK_TYPES = new Set(["function", "class", "method", "interface", "type", "enum", "struct", "impl", "trait", "module"]);
+const CALL_GRAPH_SYMBOL_CHUNK_TYPES = new Set([
+  "function_declaration",
+  "function",
+  "arrow_function",
+  "method_definition",
+  "class_declaration",
+  "interface_declaration",
+  "type_alias_declaration",
+  "enum_declaration",
+  "function_definition",
+  "class_definition",
+  "decorated_definition",
+  "method_declaration",
+  "type_declaration",
+  "type_spec",
+  "function_item",
+  "impl_item",
+  "struct_item",
+  "enum_item",
+  "trait_item",
+  "mod_item",
+]);
 
 function float32ArrayToBuffer(arr: number[]): Buffer {
   const float32 = new Float32Array(arr);
@@ -766,7 +787,7 @@ export class Indexer {
       const fileSymbols: SymbolData[] = [];
 
       for (const chunk of parsed.chunks) {
-        if (!chunk.name || !SEMANTIC_CHUNK_TYPES.has(chunk.chunkType)) continue;
+        if (!chunk.name || !CALL_GRAPH_SYMBOL_CHUNK_TYPES.has(chunk.chunkType)) continue;
 
         const symbolId = `sym_${hashContent(parsed.path + ":" + chunk.name + ":" + chunk.chunkType + ":" + chunk.startLine).slice(0, 16)}`;
         const symbol: SymbolData = {

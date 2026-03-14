@@ -190,34 +190,104 @@ interface IndexCompatibility {
 }
 
 const INDEX_METADATA_VERSION = "1";
+const RANKING_TOKEN_CACHE_LIMIT = 4096;
+
+const rankingQueryTokenCache = new Map<string, Set<string>>();
+const rankingNameTokenCache = new Map<string, Set<string>>();
+const rankingPathTokenCache = new Map<string, Set<string>>();
+
+function setBoundedCache(
+  cache: Map<string, Set<string>>,
+  key: string,
+  value: Set<string>
+): void {
+  if (cache.size >= RANKING_TOKEN_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) {
+      cache.delete(oldest);
+    }
+  }
+  cache.set(key, value);
+}
 
 function tokenizeForRanking(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
+  if (!text) {
+    return new Set<string>();
+  }
+
+  const lowered = text.toLowerCase();
+  const cache = rankingQueryTokenCache.get(lowered);
+  if (cache) {
+    return cache;
+  }
+
+  const tokens = new Set(
+    lowered
       .replace(/[^\w\s]/g, " ")
       .split(/\s+/)
       .filter((token) => token.length > 1)
   );
+  setBoundedCache(rankingQueryTokenCache, lowered, tokens);
+  return tokens;
 }
 
 function splitPathTokens(filePath: string): Set<string> {
-  const normalized = filePath
-    .toLowerCase()
+  const lowered = filePath.toLowerCase();
+  const cache = rankingPathTokenCache.get(lowered);
+  if (cache) {
+    return cache;
+  }
+
+  const normalized = lowered
     .replace(/[^a-z0-9/._-]/g, " ")
     .split(/[/._-]+/)
     .filter((token) => token.length > 1);
-  return new Set(normalized);
+  const tokens = new Set(normalized);
+  setBoundedCache(rankingPathTokenCache, lowered, tokens);
+  return tokens;
+}
+
+function splitNameTokens(name: string): Set<string> {
+  if (!name) {
+    return new Set<string>();
+  }
+
+  const lowered = name.toLowerCase();
+  const cache = rankingNameTokenCache.get(lowered);
+  if (cache) {
+    return cache;
+  }
+
+  const tokens = new Set(
+    lowered
+      .replace(/[^\w\s]/g, " ")
+      .split(/\s+/)
+      .filter((token) => token.length > 1)
+  );
+  setBoundedCache(rankingNameTokenCache, lowered, tokens);
+  return tokens;
 }
 
 function chunkTypeBoost(chunkType: string): number {
-  if (["function", "function_declaration", "method", "method_definition", "class", "class_declaration"].includes(chunkType)) {
-    return 0.2;
+  switch (chunkType) {
+    case "function":
+    case "function_declaration":
+    case "method":
+    case "method_definition":
+    case "class":
+    case "class_declaration":
+      return 0.2;
+    case "interface":
+    case "type":
+    case "enum":
+    case "struct":
+    case "impl":
+    case "trait":
+    case "module":
+      return 0.1;
+    default:
+      return 0;
   }
-  if (["interface", "type", "enum", "struct", "impl", "trait", "module"].includes(chunkType)) {
-    return 0.1;
-  }
-  return 0;
 }
 
 export function fuseResultsWeighted(
@@ -315,19 +385,29 @@ export function rerankResults(
 
   const topN = Math.min(rerankTopN, candidates.length);
   const queryTokens = tokenizeForRanking(query);
+  if (queryTokens.size === 0) {
+    return candidates;
+  }
+
+  const queryTokenList = Array.from(queryTokens);
   const head = candidates.slice(0, topN).map((candidate, idx) => {
     const pathTokens = splitPathTokens(candidate.metadata.filePath);
-    const nameTokens = tokenizeForRanking(candidate.metadata.name ?? "");
+    const nameTokens = splitNameTokens(candidate.metadata.name ?? "");
     let exactOrPrefixNameHits = 0;
     let pathOverlap = 0;
 
-    for (const token of queryTokens) {
-      for (const nameToken of nameTokens) {
-        if (nameToken === token || nameToken.startsWith(token) || token.startsWith(nameToken)) {
-          exactOrPrefixNameHits += 1;
-          break;
+    for (const token of queryTokenList) {
+      if (nameTokens.has(token)) {
+        exactOrPrefixNameHits += 1;
+      } else {
+        for (const nameToken of nameTokens) {
+          if (nameToken.startsWith(token) || token.startsWith(nameToken)) {
+            exactOrPrefixNameHits += 1;
+            break;
+          }
         }
       }
+
       if (pathTokens.has(token)) {
         pathOverlap += 1;
       }
@@ -1491,8 +1571,22 @@ export class Indexer {
     const keywordResults = await this.keywordSearch(query, maxResults * 4);
     const keywordMs = performance.now() - keywordStartTime;
 
+    let branchChunkIds: Set<string> | null = null;
+    if (filterByBranch && this.currentBranch !== "default") {
+      branchChunkIds = new Set(database.getBranchChunkIds(this.currentBranch));
+    }
+
+    const prefilterStartTime = performance.now();
+    const semanticCandidates = branchChunkIds
+      ? semanticResults.filter((r) => branchChunkIds.has(r.id))
+      : semanticResults;
+    const keywordCandidates = branchChunkIds
+      ? keywordResults.filter((r) => branchChunkIds.has(r.id))
+      : keywordResults;
+    const prefilterMs = performance.now() - prefilterStartTime;
+
     const fusionStartTime = performance.now();
-    const combined = rankHybridResults(query, semanticResults, keywordResults, {
+    const combined = rankHybridResults(query, semanticCandidates, keywordCandidates, {
       fusionStrategy,
       rrfK,
       rerankTopN,
@@ -1501,15 +1595,8 @@ export class Indexer {
     });
     const fusionMs = performance.now() - fusionStartTime;
 
-    let branchChunkIds: Set<string> | null = null;
-    if (filterByBranch && this.currentBranch !== "default") {
-      branchChunkIds = new Set(database.getBranchChunkIds(this.currentBranch));
-    }
-
     const filtered = combined.filter((r) => {
       if (r.score < this.config.search.minScore) return false;
-
-      if (branchChunkIds && !branchChunkIds.has(r.id)) return false;
 
       if (options?.fileType) {
         const ext = r.metadata.filePath.split(".").pop()?.toLowerCase();
@@ -1543,6 +1630,7 @@ export class Indexer {
       embeddingMs: Math.round(embeddingMs * 100) / 100,
       vectorMs: Math.round(vectorMs * 100) / 100,
       keywordMs: Math.round(keywordMs * 100) / 100,
+      prefilterMs: Math.round(prefilterMs * 100) / 100,
       fusionMs: Math.round(fusionMs * 100) / 100,
     });
 
@@ -1846,22 +1934,27 @@ export class Indexer {
     const vectorStartTime = performance.now();
     const semanticResults = store.search(embedding, limit * 2);
     const vectorMs = performance.now() - vectorStartTime;
-    const rerankTopN = this.config.search.rerankTopN;
-
-    const ranked = rankSemanticOnlyResults(code, semanticResults, {
-      rerankTopN,
-      limit,
-    });
 
     let branchChunkIds: Set<string> | null = null;
     if (filterByBranch && this.currentBranch !== "default") {
       branchChunkIds = new Set(database.getBranchChunkIds(this.currentBranch));
     }
 
+    const prefilterStartTime = performance.now();
+    const semanticCandidates = branchChunkIds
+      ? semanticResults.filter((r) => branchChunkIds.has(r.id))
+      : semanticResults;
+    const prefilterMs = performance.now() - prefilterStartTime;
+
+    const rerankTopN = this.config.search.rerankTopN;
+
+    const ranked = rankSemanticOnlyResults(code, semanticCandidates, {
+      rerankTopN,
+      limit,
+    });
+
     const filtered = ranked.filter((r) => {
       if (r.score < this.config.search.minScore) return false;
-
-      if (branchChunkIds && !branchChunkIds.has(r.id)) return false;
 
       if (options?.excludeFile) {
         if (r.metadata.filePath === options.excludeFile) return false;
@@ -1898,6 +1991,7 @@ export class Indexer {
       totalMs: Math.round(totalSearchMs * 100) / 100,
       embeddingMs: Math.round(embeddingMs * 100) / 100,
       vectorMs: Math.round(vectorMs * 100) / 100,
+      prefilterMs: Math.round(prefilterMs * 100) / 100,
     });
 
     return Promise.all(

@@ -2,15 +2,39 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseConfig } from "../src/config/schema.js";
 import { Indexer } from "../src/indexer/index.js";
 
 describe("search integration", () => {
   let tempDir: string;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { input?: string[] };
+      const texts = Array.isArray(body.input) ? body.input : [];
+
+      const data = texts.map((text) => {
+        let seed = 0;
+        for (const ch of text) {
+          seed = (seed * 31 + ch.charCodeAt(0)) % 1000;
+        }
+        const embedding = Array.from({ length: 8 }, (_, idx) => ((seed + idx * 17) % 997) / 997);
+        return { embedding };
+      });
+
+      return new Response(
+        JSON.stringify({
+          data,
+          usage: { total_tokens: Math.max(1, texts.length * 8) },
+        }),
+        { status: 200 }
+      );
+    });
+
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "search-integration-"));
 
     fs.mkdirSync(path.join(tempDir, "app", "indexer"), { recursive: true });
@@ -41,12 +65,18 @@ export function rerankResults(query: string) { return rankHybridResults(query); 
   });
 
   afterEach(() => {
+    fetchSpy.mockRestore();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("returns implementation definitions before fixture/benchmark noise for implementation-intent query", async () => {
     const config = parseConfig({
-      embeddingProvider: "mock",
+      embeddingProvider: "custom",
+      customProvider: {
+        baseUrl: "http://localhost:11434/v1",
+        model: "mock-embedding-model",
+        dimensions: 8,
+      },
       indexing: {
         watchFiles: false,
       },

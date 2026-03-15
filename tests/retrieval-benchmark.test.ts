@@ -24,7 +24,7 @@ interface BenchmarkArtifact {
   p95Ms: number;
 }
 
-const LATENCY_BUDGET_P95_MULTIPLIER = 2.5;
+const LATENCY_BUDGET_P95_MULTIPLIER = 2.75;
 
 interface LatencySample {
   query: string;

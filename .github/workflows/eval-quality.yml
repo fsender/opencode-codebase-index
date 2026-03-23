@@ -1,0 +1,96 @@
+name: Eval Quality Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  eval-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build native module
+        working-directory: native
+        run: |
+          cargo build --release
+          npx napi build --release --platform
+
+      - name: Ensure eval baseline exists
+        run: |
+          if [ ! -f benchmarks/baselines/eval-baseline-summary.json ]; then
+            echo "Missing benchmarks/baselines/eval-baseline-summary.json"
+            exit 1
+          fi
+
+      - name: Create eval quality config from secrets
+        env:
+          EVAL_EMBED_BASE_URL: ${{ secrets.EVAL_EMBED_BASE_URL }}
+          EVAL_EMBED_API_KEY: ${{ secrets.EVAL_EMBED_API_KEY }}
+          EVAL_EMBED_MODEL: ${{ secrets.EVAL_EMBED_MODEL }}
+          EVAL_EMBED_DIMENSIONS: ${{ secrets.EVAL_EMBED_DIMENSIONS }}
+        run: |
+          if [ -z "$EVAL_EMBED_BASE_URL" ]; then
+            echo "Missing secret: EVAL_EMBED_BASE_URL"
+            exit 1
+          fi
+          if [ -z "$EVAL_EMBED_API_KEY" ]; then
+            echo "Missing secret: EVAL_EMBED_API_KEY"
+            exit 1
+          fi
+          MODEL="${EVAL_EMBED_MODEL:-text-embedding-3-small}"
+          DIMS="${EVAL_EMBED_DIMENSIONS:-1536}"
+          cat > .github/eval-quality-config.json <<EOF
+          {
+            "embeddingProvider": "custom",
+            "customProvider": {
+              "baseUrl": "${EVAL_EMBED_BASE_URL}",
+              "apiKey": "${EVAL_EMBED_API_KEY}",
+              "model": "${MODEL}",
+              "dimensions": ${DIMS},
+              "timeoutMs": 30000
+            },
+            "indexing": {
+              "autoIndex": false,
+              "watchFiles": false,
+              "respectGitignore": true,
+              "semanticOnly": false,
+              "requireProjectMarker": false
+            },
+            "search": {
+              "maxResults": 10,
+              "minScore": 0,
+              "hybridWeight": 0.4,
+              "fusionStrategy": "rrf",
+              "rrfK": 60,
+              "rerankTopN": 20,
+              "enableCrossLanguage": true
+            },
+            "debug": {
+              "enabled": false,
+              "logLevel": "info",
+              "metrics": true
+            }
+          }
+          EOF
+
+      - name: Run eval quality gate (real provider config required)
+        run: npx tsx src/cli.ts eval run --config .github/eval-quality-config.json --reindex --ci --budget benchmarks/budgets/default.json --against benchmarks/baselines/eval-baseline-summary.json

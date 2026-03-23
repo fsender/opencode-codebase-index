@@ -60,3 +60,25 @@ jobs:
 
       - name: Run tests with coverage
         run: npm run test:coverage
+
+      - name: Start mock embeddings server for eval smoke
+        run: |
+          node scripts/eval-mock-embeddings-server.mjs > /tmp/eval-mock-embeddings.log 2>&1 &
+          echo $! > /tmp/eval-mock-embeddings.pid
+          for i in {1..20}; do
+            if curl -sf http://127.0.0.1:11434/health >/dev/null; then
+              echo "Mock embeddings server is healthy"
+              break
+            fi
+            sleep 0.25
+          done
+
+      - name: Run eval harness smoke check (mock embeddings)
+        run: npm run eval:smoke
+
+      - name: Stop mock embeddings server
+        if: always()
+        run: |
+          if [ -f /tmp/eval-mock-embeddings.pid ]; then
+            kill "$(cat /tmp/eval-mock-embeddings.pid)" || true
+          fi

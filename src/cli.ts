@@ -5,6 +5,7 @@ import * as path from "path";
 import * as os from "os";
 
 import { parseConfig } from "./config/schema.js";
+import { handleEvalCommand } from "./eval/cli.js";
 import { createMcpServer } from "./mcp-server.js";
 
 function loadJsonFile(filePath: string): unknown {
@@ -48,6 +49,11 @@ function parseArgs(argv: string[]): { project: string; config?: string } {
 }
 
 async function main(): Promise<void> {
+  if (process.argv[2] === "eval") {
+    const exitCode = await handleEvalCommand(process.argv.slice(3), process.cwd());
+    process.exit(exitCode);
+  }
+
   const args = parseArgs(process.argv);
   const rawConfig = loadPluginConfig(args.project, args.config);
   const config = parseConfig(rawConfig);

@@ -1,0 +1,104 @@
+{
+  "version": "1.0.0",
+  "name": "cross-repo-axios",
+  "description": "Auto-generated cross-repo benchmark dataset for axios",
+  "queries": [
+    {
+      "id": "axios-definition-01",
+      "query": "where is methodName defined",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "bin/GithubAPI.js",
+        "symbol": "methodName"
+      }
+    },
+    {
+      "id": "axios-definition-02",
+      "query": "where is getFilesFromNPM defined",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "bin/pr.js",
+        "symbol": "getFilesFromNPM"
+      }
+    },
+    {
+      "id": "axios-definition-03",
+      "query": "where is RepoBot defined",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "bin/RepoBot.js",
+        "symbol": "RepoBot"
+      }
+    },
+    {
+      "id": "axios-implementation-intent-04",
+      "query": "how does run-karma-tests handle error handling",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "bin/run-karma-tests.js"
+        ]
+      }
+    },
+    {
+      "id": "axios-implementation-intent-05",
+      "query": "how does network_enhanced handle request handling",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "examples/network_enhanced.js"
+        ]
+      }
+    },
+    {
+      "id": "axios-implementation-intent-06",
+      "query": "how does server handle core behavior",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "examples/server.js"
+        ]
+      }
+    },
+    {
+      "id": "axios-similarity-07",
+      "query": "core behavior function pattern with getIndexTemplate",
+      "queryType": "similarity",
+      "expected": {
+        "acceptableFiles": [
+          "examples/server.js"
+        ]
+      }
+    },
+    {
+      "id": "axios-similarity-08",
+      "query": "core behavior function pattern with getContributors",
+      "queryType": "similarity",
+      "expected": {
+        "acceptableFiles": [
+          "gulpfile.js"
+        ]
+      }
+    },
+    {
+      "id": "axios-keyword-heavy-09",
+      "query": "send200 body send200 sendResponse",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "examples/server.js"
+        ]
+      }
+    },
+    {
+      "id": "axios-keyword-heavy-10",
+      "query": "getContributors contributors encodeURIComponent contributor",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "gulpfile.js"
+        ]
+      }
+    }
+  ]
+}

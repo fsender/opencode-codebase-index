@@ -1,0 +1,104 @@
+{
+  "version": "1.0.0",
+  "name": "cross-repo-express",
+  "description": "Auto-generated cross-repo benchmark dataset for express",
+  "queries": [
+    {
+      "id": "express-definition-01",
+      "query": "where is authenticate defined",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "examples/auth/index.js",
+        "symbol": "authenticate"
+      }
+    },
+    {
+      "id": "express-definition-02",
+      "query": "where is format defined",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "examples/content-negotiation/index.js",
+        "symbol": "format"
+      }
+    },
+    {
+      "id": "express-definition-03",
+      "query": "where is error defined",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "examples/error/index.js",
+        "symbol": "error"
+      }
+    },
+    {
+      "id": "express-implementation-intent-04",
+      "query": "how does index handle middleware",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "examples/error/index.js"
+        ]
+      }
+    },
+    {
+      "id": "express-implementation-intent-05",
+      "query": "how does index handle core behavior",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "examples/online/index.js"
+        ]
+      }
+    },
+    {
+      "id": "express-implementation-intent-06",
+      "query": "how does index handle error handling",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "examples/route-middleware/index.js"
+        ]
+      }
+    },
+    {
+      "id": "express-similarity-07",
+      "query": "error handling function pattern with andRestrictToSelf",
+      "queryType": "similarity",
+      "expected": {
+        "acceptableFiles": [
+          "examples/route-middleware/index.js"
+        ]
+      }
+    },
+    {
+      "id": "express-similarity-08",
+      "query": "core behavior function pattern with GithubView",
+      "queryType": "similarity",
+      "expected": {
+        "acceptableFiles": [
+          "examples/view-constructor/github-view.js"
+        ]
+      }
+    },
+    {
+      "id": "express-keyword-heavy-09",
+      "query": "GithubView name options templates",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "examples/view-constructor/github-view.js"
+        ]
+      }
+    },
+    {
+      "id": "express-keyword-heavy-10",
+      "query": "ferrets ferrets user filter",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "examples/view-locals/index.js"
+        ]
+      }
+    }
+  ]
+}

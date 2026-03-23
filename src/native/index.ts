@@ -1,6 +1,9 @@
 import * as path from "path";
 import * as os from "os";
+import { createRequire } from "module";
 import { fileURLToPath } from "url";
+
+const require = createRequire(import.meta.url);
 
 function getNativeBinding() {
   const platform = os.platform();
@@ -48,7 +51,6 @@ function getNativeBinding() {
   const nativePath = path.join(packageRoot, 'native', bindingName);
   
   // Load the native module - use standard require for .node files
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require(nativePath);
 }
 

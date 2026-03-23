@@ -1,0 +1,247 @@
+# Evaluation Harness
+
+This project ships a first-class retrieval evaluation harness with CLI subcommands, versioned golden datasets, comparison mode, parameter sweeps, CI gating, and timestamped artifacts.
+
+## Commands
+
+### Run evaluation
+
+```bash
+npm run eval -- --dataset benchmarks/golden/small.json
+```
+
+Optional flags:
+
+- `--project <path>`: project root (default: current directory)
+- `--config <path>`: config JSON path
+- `--output <path>`: output root (default: `benchmarks/results`)
+- `--reindex`: force a full reindex before evaluation
+- `--fusionStrategy <rrf|weighted>`
+- `--hybridWeight <0-1>`
+- `--rrfK <number>`
+- `--rerankTopN <number>`
+
+### Compare against baseline
+
+```bash
+npm run eval:compare -- --against benchmarks/baselines/eval-baseline-summary.json --dataset benchmarks/golden/medium.json
+```
+
+This runs a fresh evaluation and writes `compare.json` with metric deltas.
+
+### CI gate mode
+
+```bash
+npm run eval:ci
+```
+
+Default script:
+
+```bash
+npx tsx src/cli.ts eval run --ci --budget benchmarks/budgets/default.json --against benchmarks/baselines/eval-baseline-summary.json
+```
+
+CI mode fails when configured thresholds regress beyond tolerance.
+
+### CI integration in GitHub Actions
+
+There are two CI levels:
+
+1. **Main CI (`ci.yml`)** runs `npm run eval:smoke` with a local mock embedding server (`scripts/eval-mock-embeddings-server.mjs`) and `.github/eval-config.json`.
+   - Purpose: verify eval harness integrity (CLI, schema validation, artifact writing, report generation) without external dependencies.
+   - This is **not** a retrieval-quality signal.
+
+2. **Quality gate workflow (`eval-quality.yml`)** runs `npm run eval:ci` with your real provider config/authentication context.
+   - Purpose: enforce actual quality/latency regressions against baselines/budgets.
+   - Triggered on schedule (`cron`) and manually (`workflow_dispatch`).
+
+This split keeps regular CI stable while preserving meaningful retrieval-quality gating.
+
+### Setting up real provider secrets for `eval-quality.yml`
+
+Configure these GitHub repository secrets:
+
+- `EVAL_EMBED_BASE_URL` (required) — OpenAI-compatible base URL ending in `/v1`
+- `EVAL_EMBED_API_KEY` (required)
+- `EVAL_EMBED_MODEL` (optional, default `text-embedding-3-small`)
+- `EVAL_EMBED_DIMENSIONS` (optional, default `1536`)
+
+The workflow generates `.github/eval-quality-config.json` from secrets and runs:
+
+```bash
+npx tsx src/cli.ts eval run --config .github/eval-quality-config.json --reindex --ci --budget benchmarks/budgets/default.json --against benchmarks/baselines/eval-baseline-summary.json
+```
+
+#### Example values
+
+- OpenAI direct:
+  - `EVAL_EMBED_BASE_URL=https://api.openai.com/v1`
+  - `EVAL_EMBED_MODEL=text-embedding-3-small`
+  - `EVAL_EMBED_DIMENSIONS=1536`
+
+- Gateway/proxy (LiteLLM, vLLM, OpenRouter-like OpenAI-compatible endpoint):
+  - `EVAL_EMBED_BASE_URL=https://your-gateway.example.com/v1`
+  - `EVAL_EMBED_MODEL=<gateway embedding model id>`
+  - `EVAL_EMBED_DIMENSIONS=<model output dimensions>`
+
+If dimensions do not match returned vectors, eval fails fast with a clear mismatch error.
+
+### Ollama quality gate (manual/local, not CI)
+
+If you do not have OpenAI API access, run the quality gate locally with Ollama:
+
+- Config: `.github/eval-ollama-config.json`
+- Command: `npm run eval:ci:ollama`
+
+Prerequisites:
+
+1. Ollama installed and available in `PATH`
+2. `ollama serve` running on `127.0.0.1:11434`
+3. `nomic-embed-text` pulled (`ollama pull nomic-embed-text`)
+
+### Parameter sweeps
+
+Run sweeps by passing comma-separated values:
+
+```bash
+npm run eval -- \
+  --dataset benchmarks/golden/small.json \
+  --sweepFusionStrategy rrf,weighted \
+  --sweepHybridWeight 0.3,0.5,0.7 \
+  --sweepRrfK 30,60 \
+  --sweepRerankTopN 10,20
+```
+
+The harness emits an aggregate `compare.json` containing all runs and best configurations.
+
+## Golden dataset schema
+
+Golden sets are versioned JSON files:
+
+- `benchmarks/golden/small.json`
+- `benchmarks/golden/medium.json`
+- `benchmarks/golden/large.json`
+
+Schema:
+
+```json
+{
+  "version": "1.0.0",
+  "name": "small",
+  "description": "optional",
+  "queries": [
+    {
+      "id": "def-rank-hybrid-results",
+      "query": "where is rankHybridResults implementation",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "acceptableFiles": ["src/indexer/index.ts"],
+        "symbol": "rankHybridResults",
+        "branch": "optional-branch-name"
+      }
+    }
+  ]
+}
+```
+
+### `queryType`
+
+Allowed values:
+
+- `definition`
+- `implementation-intent`
+- `similarity`
+- `keyword-heavy`
+
+### `expected`
+
+Required: at least one of:
+
+- `expected.filePath` (exact target)
+- `expected.acceptableFiles` (acceptable target list)
+
+Optional:
+
+- `expected.symbol`
+- `expected.branch`
+
+Validation errors are surfaced with clear path-specific messages (e.g. `queries[2].expected.acceptableFiles must be an array of strings`).
+
+## Metrics
+
+The harness computes:
+
+- Hit@1, Hit@3, Hit@5, Hit@10
+- MRR@10
+- nDCG@10
+- Latency p50/p95/p99
+- Token estimate + embedding call counts + estimated embedding cost
+- Failure buckets:
+  - `wrong-file`
+  - `wrong-symbol`
+  - `docs-tests-outranking-source`
+  - `no-relevant-hit-top-k`
+
+## Artifact layout
+
+Each run writes to:
+
+`benchmarks/results/<timestamp>/`
+
+Files:
+
+- `summary.json` — machine-readable summary
+- `summary.md` — human markdown report
+- `per-query.json` — per-query details and top-k hits
+- `compare.json` — baseline deltas or sweep aggregate (when baseline/sweep used)
+
+## Baseline blessing workflow
+
+1. Run a trusted evaluation:
+
+   ```bash
+   npm run eval -- --dataset benchmarks/golden/medium.json
+   ```
+
+2. Copy the generated `summary.json` into the baseline path:
+
+   ```bash
+   cp benchmarks/results/<timestamp>/summary.json benchmarks/baselines/eval-baseline-summary.json
+   ```
+
+3. Re-run compare:
+
+   ```bash
+   npm run eval:compare -- --against benchmarks/baselines/eval-baseline-summary.json
+   ```
+
+4. If deltas are expected and acceptable, keep the updated baseline in version control.
+
+## CI budget tuning
+
+Budget file: `benchmarks/budgets/default.json`
+
+Example:
+
+```json
+{
+  "name": "default-eval-budget",
+  "baselinePath": "benchmarks/baselines/eval-baseline-summary.json",
+  "failOnMissingBaseline": true,
+  "thresholds": {
+    "hitAt5MaxDrop": 0.03,
+    "mrrAt10MaxDrop": 0.03,
+    "p95LatencyMaxMultiplier": 1.35,
+    "p95LatencyMaxAbsoluteMs": 4000,
+    "minHitAt5": 0.4,
+    "minMrrAt10": 0.25
+  }
+}
+```
+
+Guidance:
+
+- Tighten `hitAt5MaxDrop` / `mrrAt10MaxDrop` gradually.
+- Keep `p95LatencyMaxMultiplier` tolerant enough for CI variance.
+- Use absolute floor metrics (`minHitAt5`, `minMrrAt10`) to prevent silent quality drift.

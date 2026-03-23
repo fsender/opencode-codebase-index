@@ -1,7 +1,7 @@
 {
   "generatedAt": "2026-03-22T11:52:53.465Z",
-  "projectRoot": "/Users/kenneth/.worktress/opencode-codebase-index/feature/eval-harness",
-  "datasetPath": "/Users/kenneth/.worktress/opencode-codebase-index/feature/eval-harness/benchmarks/golden/small.json",
+  "projectRoot": ".",
+  "datasetPath": "benchmarks/golden/small.json",
   "datasetName": "small",
   "datasetVersion": "1.0.0",
   "queryCount": 4,

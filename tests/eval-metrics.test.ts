@@ -164,4 +164,51 @@ describe("eval metrics", () => {
     expect(metrics.embedding.callCount).toBe(20);
     expect(metrics.embedding.estimatedCostUsd).toBeCloseTo(0.00002, 8);
   });
+
+  it("uses deterministic percentile behavior for tiny samples", () => {
+    const q = query();
+    const build = (id: string, latencyMs: number) =>
+      buildPerQueryResult(
+        { ...q, id },
+        [
+          {
+            filePath: "/repo/src/indexer/index.ts",
+            startLine: 1,
+            endLine: 2,
+            score: 1,
+            chunkType: "function",
+            name: "rankHybridResults",
+          },
+        ],
+        latencyMs,
+        10
+      );
+
+    const one = computeEvalMetrics([q], [build("q1", 10)], 0, 0, 0);
+    expect(one.latencyMs.p50).toBe(10);
+    expect(one.latencyMs.p95).toBe(10);
+    expect(one.latencyMs.p99).toBe(10);
+
+    const two = computeEvalMetrics(
+      [{ ...q, id: "q1" }, { ...q, id: "q2" }],
+      [build("q1", 10), build("q2", 110)],
+      0,
+      0,
+      0
+    );
+    expect(two.latencyMs.p50).toBeCloseTo(60, 6);
+    expect(two.latencyMs.p95).toBeCloseTo(105, 6);
+    expect(two.latencyMs.p99).toBeCloseTo(109, 6);
+
+    const five = computeEvalMetrics(
+      [{ ...q, id: "q1" }, { ...q, id: "q2" }, { ...q, id: "q3" }, { ...q, id: "q4" }, { ...q, id: "q5" }],
+      [build("q1", 1), build("q2", 2), build("q3", 3), build("q4", 4), build("q5", 5)],
+      0,
+      0,
+      0
+    );
+    expect(five.latencyMs.p50).toBe(3);
+    expect(five.latencyMs.p95).toBeCloseTo(4.8, 6);
+    expect(five.latencyMs.p99).toBeCloseTo(4.96, 6);
+  });
 });

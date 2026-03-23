@@ -9,9 +9,16 @@ import type {
 
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
+  if (values.length === 1) return values[0];
   const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.floor(p * sorted.length));
-  return sorted[idx];
+  const x = p * (sorted.length - 1);
+  const lowerIndex = Math.floor(x);
+  const upperIndex = Math.ceil(x);
+  if (lowerIndex === upperIndex) {
+    return sorted[lowerIndex];
+  }
+  const fraction = x - lowerIndex;
+  return sorted[lowerIndex] + fraction * (sorted[upperIndex] - sorted[lowerIndex]);
 }
 
 function normalizePath(input: string): string {

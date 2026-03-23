@@ -5,6 +5,7 @@ export function evaluateBudgetGate(
   summary: EvalSummary,
   comparison?: EvalComparison
 ): EvalGateResult {
+  const BASELINE_P95_EPSILON_MS = 0.001;
   const violations: EvalGateResult["violations"] = [];
 
   const { thresholds } = budget;
@@ -46,12 +47,14 @@ export function evaluateBudgetGate(
 
     if (thresholds.p95LatencyMaxMultiplier !== undefined) {
       const baselineP95 = comparison.deltas.latencyP95Ms.baseline;
-      const allowed = baselineP95 * thresholds.p95LatencyMaxMultiplier;
-      if (summary.metrics.latencyMs.p95 > allowed) {
-        violations.push({
-          metric: "p95LatencyMaxMultiplier",
-          message: `p95 latency ${summary.metrics.latencyMs.p95.toFixed(3)}ms exceeds allowed ${allowed.toFixed(3)}ms (${thresholds.p95LatencyMaxMultiplier.toFixed(2)}x baseline)`,
-        });
+      if (baselineP95 > BASELINE_P95_EPSILON_MS) {
+        const allowed = baselineP95 * thresholds.p95LatencyMaxMultiplier;
+        if (summary.metrics.latencyMs.p95 > allowed) {
+          violations.push({
+            metric: "p95LatencyMaxMultiplier",
+            message: `p95 latency ${summary.metrics.latencyMs.p95.toFixed(3)}ms exceeds allowed ${allowed.toFixed(3)}ms (${thresholds.p95LatencyMaxMultiplier.toFixed(2)}x baseline)`,
+          });
+        }
       }
     }
   }

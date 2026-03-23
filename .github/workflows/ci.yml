@@ -8,23 +8,24 @@ on:
 
 jobs:
   test:
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
           components: clippy, rustfmt
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           workspaces: native -> target
 
@@ -65,13 +66,19 @@ jobs:
         run: |
           node scripts/eval-mock-embeddings-server.mjs > /tmp/eval-mock-embeddings.log 2>&1 &
           echo $! > /tmp/eval-mock-embeddings.pid
+          healthy=0
           for i in {1..20}; do
             if curl -sf http://127.0.0.1:11434/health >/dev/null; then
               echo "Mock embeddings server is healthy"
+              healthy=1
               break
             fi
             sleep 0.25
           done
+          if [ "$healthy" -ne 1 ]; then
+            echo "Mock embeddings server failed health check"
+            exit 1
+          fi
 
       - name: Run eval harness smoke check (mock embeddings)
         run: npm run eval:smoke

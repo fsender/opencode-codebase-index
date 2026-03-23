@@ -9,6 +9,7 @@ interface ParsedArgs {
   projectRoot: string;
   configPath?: string;
   datasetPath: string;
+  currentPath?: string;
   outputRoot: string;
   againstPath?: string;
   budgetPath?: string;
@@ -31,11 +32,13 @@ function printUsage(): void {
 Usage:
   opencode-codebase-index-mcp eval run [options]
   opencode-codebase-index-mcp eval compare --against <summary.json> [options]
+  opencode-codebase-index-mcp eval diff --current <summary.json> --against <summary.json> [options]
 
 Options:
   --project <path>                 Project root (default: cwd)
   --config <path>                  Config JSON path
   --dataset <path>                 Golden dataset path (default: benchmarks/golden/small.json)
+  --current <path>                 Current summary.json path (required for eval diff)
   --output <path>                  Output root dir (default: benchmarks/results)
   --against <path>                 Baseline summary.json to compare against
   --budget <path>                  Budget file for CI mode (default: benchmarks/budgets/default.json)
@@ -124,6 +127,11 @@ function parseEvalArgs(argv: string[], cwd: string): ParsedArgs {
     }
     if (arg === "--dataset" && next) {
       parsed.datasetPath = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--current" && next) {
+      parsed.currentPath = next;
       i += 1;
       continue;
     }
@@ -259,6 +267,12 @@ export async function handleEvalCommand(args: string[], cwd: string): Promise<nu
       const sweep = await runSweep(runOptions, parsed.sweep);
       console.log(`Eval sweep complete. Artifacts: ${sweep.outputDir}`);
       console.log(`Sweep runs: ${sweep.aggregate.runCount}`);
+      if (parsed.ciMode && sweep.aggregate.gatePassed === false) {
+        console.error(
+          `[CI-GATE] Sweep failed: ${sweep.aggregate.failedGateRuns ?? 0} run(s) violated budget/baseline gates`
+        );
+        return 1;
+      }
       return 0;
     }
 
@@ -291,6 +305,12 @@ export async function handleEvalCommand(args: string[], cwd: string): Promise<nu
     if (hasSweepOptions(parsed.sweep)) {
       const sweep = await runSweep(runOptions, parsed.sweep);
       console.log(`Eval compare sweep complete. Artifacts: ${sweep.outputDir}`);
+      if (parsed.ciMode && sweep.aggregate.gatePassed === false) {
+        console.error(
+          `[CI-GATE] Sweep failed: ${sweep.aggregate.failedGateRuns ?? 0} run(s) violated budget/baseline gates`
+        );
+        return 1;
+      }
       return 0;
     }
 
@@ -304,9 +324,18 @@ export async function handleEvalCommand(args: string[], cwd: string): Promise<nu
     if (!explicitAgainst) {
       throw new Error("eval diff requires --against <baseline summary.json>");
     }
+    if (!parsed.currentPath) {
+      throw new Error("eval diff requires --current <current summary.json>");
+    }
     parsed.againstPath = explicitAgainst;
 
-    const currentPath = parsed.datasetPath;
+    const currentPath = parsed.currentPath;
+    if (!currentPath.endsWith(".json")) {
+      throw new Error("eval diff --current must point to a summary JSON file");
+    }
+    if (!parsed.againstPath.endsWith(".json")) {
+      throw new Error("eval diff --against must point to a summary JSON file");
+    }
     const currentSummary = loadSummary(path.resolve(parsed.projectRoot, currentPath));
     const baselineSummary = loadSummary(path.resolve(parsed.projectRoot, parsed.againstPath));
     const comparison = compareSummaries(

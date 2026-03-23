@@ -7,21 +7,22 @@ on:
 
 jobs:
   eval-quality:
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           workspaces: native -> target
 
@@ -94,3 +95,7 @@ jobs:
 
       - name: Run eval quality gate (real provider config required)
         run: npx tsx src/cli.ts eval run --config .github/eval-quality-config.json --reindex --ci --budget benchmarks/budgets/default.json --against benchmarks/baselines/eval-baseline-summary.json
+
+      - name: Cleanup eval quality config
+        if: always()
+        run: rm -f .github/eval-quality-config.json

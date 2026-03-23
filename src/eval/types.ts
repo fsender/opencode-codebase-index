@@ -153,6 +153,7 @@ export interface SweepRunSummary {
   searchConfig: EvalSummary["searchConfig"];
   summary: EvalSummary;
   comparison?: EvalComparison;
+  gate?: EvalGateResult;
 }
 
 export interface SweepAggregateReport {
@@ -160,6 +161,8 @@ export interface SweepAggregateReport {
   againstPath?: string;
   runCount: number;
   runs: SweepRunSummary[];
+  gatePassed?: boolean;
+  failedGateRuns?: number;
   bestByHitAt5?: SweepRunSummary;
   bestByMrrAt10?: SweepRunSummary;
   bestByP95Latency?: SweepRunSummary;

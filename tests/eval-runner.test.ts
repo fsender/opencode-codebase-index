@@ -240,4 +240,94 @@ describe("eval runner", () => {
     expect(sweep.aggregate.runCount).toBe(4);
     expect(readFileSync(path.join(sweep.outputDir, "compare.json"), "utf-8")).toContain("\"runCount\"");
   });
+
+  it("enables branch filtering only when expected.branch is provided", async () => {
+    writeFileSync(
+      path.join(tempDir, "benchmarks", "golden", "small.json"),
+      JSON.stringify(
+        {
+          version: "1.0.0",
+          name: "small",
+          queries: [
+            {
+              id: "q-branch",
+              query: "where is rankHybridResults implementation",
+              queryType: "definition",
+              expected: {
+                filePath: "src/indexer/index.ts",
+                branch: "other-branch",
+              },
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+
+    await expect(
+      runEvaluation({
+        projectRoot: tempDir,
+        datasetPath: "benchmarks/golden/small.json",
+        outputRoot: "benchmarks/results",
+        ciMode: false,
+        reindex: false,
+      })
+    ).rejects.toThrow(/expects branch 'other-branch'/);
+  });
+
+  it("handles missing baseline based on failOnMissingBaseline", async () => {
+    writeFileSync(
+      path.join(tempDir, "benchmarks", "budgets", "strict.json"),
+      JSON.stringify(
+        {
+          name: "strict",
+          baselinePath: "benchmarks/baselines/missing.json",
+          failOnMissingBaseline: true,
+          thresholds: {},
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+
+    await expect(
+      runEvaluation({
+        projectRoot: tempDir,
+        datasetPath: "benchmarks/golden/small.json",
+        outputRoot: "benchmarks/results",
+        ciMode: true,
+        budgetPath: "benchmarks/budgets/strict.json",
+        reindex: false,
+      })
+    ).rejects.toThrow(/Budget baseline is missing/);
+
+    writeFileSync(
+      path.join(tempDir, "benchmarks", "budgets", "lenient.json"),
+      JSON.stringify(
+        {
+          name: "lenient",
+          baselinePath: "benchmarks/baselines/missing.json",
+          failOnMissingBaseline: false,
+          thresholds: {},
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+
+    const result = await runEvaluation({
+      projectRoot: tempDir,
+      datasetPath: "benchmarks/golden/small.json",
+      outputRoot: "benchmarks/results",
+      ciMode: true,
+      budgetPath: "benchmarks/budgets/lenient.json",
+      reindex: false,
+    });
+
+    expect(result.gate?.passed).toBe(true);
+  });
 });

@@ -130,10 +130,16 @@ export async function runEvaluation(options: EvalRunOptions): Promise<EvalRunRes
   const perQuery: PerQueryEvalResult[] = [];
 
   for (const query of dataset.queries) {
+    if (query.expected.branch && query.expected.branch !== indexer.getCurrentBranch()) {
+      throw new Error(
+        `Query '${query.id}' expects branch '${query.expected.branch}', but current branch is '${indexer.getCurrentBranch()}'. Switch branch before running this dataset.`
+      );
+    }
+
     const start = performance.now();
     const result = await indexer.search(query.query, 10, {
       metadataOnly: true,
-      filterByBranch: query.expected.branch ? false : true,
+      filterByBranch: query.expected.branch ? true : false,
     });
     const elapsed = performance.now() - start;
 
@@ -257,6 +263,7 @@ export async function runSweep(
             searchConfig: run.summary.searchConfig,
             summary: run.summary,
             comparison: run.comparison,
+            gate: run.gate,
           });
         }
       }
@@ -274,11 +281,15 @@ export async function runSweep(
   )[0];
 
   const outputDir = createRunDirectory(toAbsolute(options.projectRoot, options.outputRoot));
+  const failedGateRuns = runs.filter((run) => run.gate && !run.gate.passed).length;
+  const gatePassed = failedGateRuns === 0;
   const aggregate: SweepAggregateReport = {
     generatedAt: new Date().toISOString(),
     againstPath: options.againstPath,
     runCount: runs.length,
     runs,
+    gatePassed,
+    failedGateRuns,
     bestByHitAt5,
     bestByMrrAt10,
     bestByP95Latency,

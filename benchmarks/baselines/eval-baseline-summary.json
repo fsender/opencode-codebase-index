@@ -1,0 +1,43 @@
+{
+  "generatedAt": "2026-03-22T11:52:53.465Z",
+  "projectRoot": ".",
+  "datasetPath": "benchmarks/golden/small.json",
+  "datasetName": "small",
+  "datasetVersion": "1.0.0",
+  "queryCount": 4,
+  "topK": 10,
+  "searchConfig": {
+    "fusionStrategy": "rrf",
+    "hybridWeight": 0.4,
+    "rrfK": 60,
+    "rerankTopN": 20
+  },
+  "metrics": {
+    "hitAt1": 0.75,
+    "hitAt3": 1,
+    "hitAt5": 1,
+    "hitAt10": 1,
+    "mrrAt10": 0.875,
+    "ndcgAt10": 0.9127302324517832,
+    "latencyMs": {
+      "p50": 26.173166000000037,
+      "p95": 52.931082999999944,
+      "p99": 52.931082999999944
+    },
+    "tokenEstimate": {
+      "queryTokens": 43,
+      "embeddingTokensUsed": 1760
+    },
+    "embedding": {
+      "callCount": 5,
+      "estimatedCostUsd": 0,
+      "costPer1MTokensUsd": 0
+    },
+    "failureBuckets": {
+      "wrong-file": 1,
+      "wrong-symbol": 0,
+      "docs-tests-outranking-source": 0,
+      "no-relevant-hit-top-k": 0
+    }
+  }
+}

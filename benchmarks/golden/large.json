@@ -1,0 +1,164 @@
+{
+  "version": "1.0.0",
+  "name": "large",
+  "description": "Comprehensive golden eval set spanning retrieval, CLI, tools, config, and benchmark/reporting surfaces.",
+  "queries": [
+    {
+      "id": "def-fuse-rrf",
+      "query": "where is fuseResultsRrf implementation",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "symbol": "fuseResultsRrf"
+      }
+    },
+    {
+      "id": "def-fuse-weighted",
+      "query": "where is fuseResultsWeighted implementation",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "symbol": "fuseResultsWeighted"
+      }
+    },
+    {
+      "id": "def-rerank-results",
+      "query": "where is rerankResults function",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "symbol": "rerankResults"
+      }
+    },
+    {
+      "id": "def-parse-config",
+      "query": "where is parseConfig in config schema",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/config/schema.ts",
+        "symbol": "parseConfig"
+      }
+    },
+    {
+      "id": "impl-eval-runner",
+      "query": "evaluation runner that writes summary and per query artifacts",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "src/eval/runner.ts",
+          "src/eval/reports.ts"
+        ]
+      }
+    },
+    {
+      "id": "impl-cli-eval-compare",
+      "query": "eval compare command handling",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "src/eval/cli.ts",
+          "src/cli.ts"
+        ]
+      }
+    },
+    {
+      "id": "impl-budget-gate",
+      "query": "ci budget gate evaluation thresholds",
+      "queryType": "implementation-intent",
+      "expected": {
+        "filePath": "src/eval/budget.ts"
+      }
+    },
+    {
+      "id": "impl-metrics-computation",
+      "query": "hit at k mrr ndcg metrics calculation",
+      "queryType": "implementation-intent",
+      "expected": {
+        "filePath": "src/eval/metrics.ts"
+      }
+    },
+    {
+      "id": "sim-retrieval-benchmark-style",
+      "query": "latency percentile benchmark test patterns",
+      "queryType": "similarity",
+      "expected": {
+        "acceptableFiles": [
+          "tests/retrieval-benchmark.test.ts",
+          "benchmarks/run.ts"
+        ]
+      }
+    },
+    {
+      "id": "sim-schema-validation-style",
+      "query": "manual schema validation with clear runtime errors",
+      "queryType": "similarity",
+      "expected": {
+        "acceptableFiles": [
+          "src/config/schema.ts",
+          "src/eval/schema.ts"
+        ]
+      }
+    },
+    {
+      "id": "kw-index-metrics-debug",
+      "query": "debug metrics enabled index_metrics",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "src/tools/index.ts",
+          "src/utils/logger.ts"
+        ]
+      }
+    },
+    {
+      "id": "kw-embedding-token-cost",
+      "query": "embedding tokens estimate cost per 1M tokens",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "src/utils/cost.ts",
+          "src/config/constants.ts"
+        ]
+      }
+    },
+    {
+      "id": "impl-call-graph-query",
+      "query": "call graph callers callees query implementation",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "src/tools/index.ts",
+          "src/indexer/index.ts"
+        ]
+      }
+    },
+    {
+      "id": "def-get-status",
+      "query": "where is getStatus in indexer",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "symbol": "getStatus"
+      }
+    },
+    {
+      "id": "impl-health-check",
+      "query": "index health check stale entries gc",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "src/indexer/index.ts",
+          "src/tools/index.ts"
+        ]
+      }
+    },
+    {
+      "id": "kw-branch-aware-search",
+      "query": "filterByBranch branch prefilter search",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "filePath": "src/indexer/index.ts"
+      }
+    }
+  ]
+}

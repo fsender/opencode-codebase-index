@@ -374,6 +374,81 @@ Zero-config by default (uses `auto` mode). Customize in `.opencode/codebase-inde
   - baseline (versioned): `benchmarks/baselines/retrieval-baseline.json`
   - latest candidate run (generated): `benchmark-results/retrieval-candidate.json`
 
+## 📏 Evaluation Harness
+
+This repository includes a first-class eval system for retrieval quality with versioned golden sets, compare mode, parameter sweeps, CI budgets, and run artifacts.
+
+### Commands
+
+```bash
+npm run eval
+npm run eval:ci
+npm run eval:ci:ollama
+npm run eval:compare -- --against benchmarks/baselines/eval-baseline-summary.json
+```
+
+CI usage split:
+
+- `npm run eval:smoke`: harness smoke check with local mock embeddings (used in main CI)
+- `npm run eval:ci`: real quality gate against baseline/budget (for scheduled/manual quality workflow)
+
+For `eval-quality.yml`, configure repo secrets:
+
+- `EVAL_EMBED_BASE_URL` (OpenAI-compatible `/v1` endpoint)
+- `EVAL_EMBED_API_KEY`
+- `EVAL_EMBED_MODEL` (optional, default `text-embedding-3-small`)
+- `EVAL_EMBED_DIMENSIONS` (optional, default `1536`)
+
+No OpenAI API access? Use Ollama quality gate locally:
+
+- Config: `.github/eval-ollama-config.json`
+- Script: `npm run eval:ci:ollama`
+
+Prerequisites: Ollama installed, `ollama serve` running on `127.0.0.1:11434`, and `nomic-embed-text` pulled.
+
+Examples:
+
+```bash
+# Run against small golden set
+npm run eval -- --dataset benchmarks/golden/small.json
+
+# Compare against baseline
+npm run eval:compare -- --against benchmarks/baselines/eval-baseline-summary.json --dataset benchmarks/golden/medium.json
+
+# Sweep retrieval parameters
+npm run eval -- --dataset benchmarks/golden/small.json --sweepFusionStrategy rrf,weighted --sweepHybridWeight 0.3,0.5,0.7 --sweepRrfK 30,60 --sweepRerankTopN 10,20
+```
+
+### What it reports
+
+- Hit@1, Hit@3, Hit@5, Hit@10
+- MRR@10, nDCG@10
+- Latency p50/p95/p99
+- Token estimates, embedding call counts, estimated embedding cost
+- Failure buckets (`wrong-file`, `wrong-symbol`, `docs-tests-outranking-source`, `no-relevant-hit-top-k`)
+
+### Artifacts
+
+Each run writes:
+
+`benchmarks/results/<timestamp>/`
+
+- `summary.json`
+- `summary.md`
+- `per-query.json`
+- `compare.json` (when baseline/sweep used)
+
+### Golden sets and budgets
+
+- Golden datasets:
+  - `benchmarks/golden/small.json`
+  - `benchmarks/golden/medium.json`
+  - `benchmarks/golden/large.json`
+- CI budget:
+  - `benchmarks/budgets/default.json`
+
+Full docs: `docs/evaluation.md`
+
 ### Embedding Providers
 The plugin automatically detects available credentials in this order:
 1. **GitHub Copilot** (Free if you have it)

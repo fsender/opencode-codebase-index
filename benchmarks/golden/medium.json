@@ -1,0 +1,87 @@
+{
+  "version": "1.0.0",
+  "name": "medium",
+  "description": "Broader golden eval set covering CLI, tools, config, and ranking paths.",
+  "queries": [
+    {
+      "id": "def-indexer-search",
+      "query": "where is search implementation in indexer",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "symbol": "search"
+      }
+    },
+    {
+      "id": "def-rank-semantic-only",
+      "query": "where is rankSemanticOnlyResults implementation",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "symbol": "rankSemanticOnlyResults"
+      }
+    },
+    {
+      "id": "impl-cli-eval-entry",
+      "query": "eval run command entrypoint",
+      "queryType": "implementation-intent",
+      "expected": {
+        "acceptableFiles": [
+          "src/cli.ts",
+          "src/eval/cli.ts"
+        ]
+      }
+    },
+    {
+      "id": "impl-index-metrics-tool",
+      "query": "index_metrics tool implementation",
+      "queryType": "implementation-intent",
+      "expected": {
+        "filePath": "src/tools/index.ts",
+        "symbol": "index_metrics"
+      }
+    },
+    {
+      "id": "sim-retrieval-ranking-tests",
+      "query": "tests for retrieval ranking and rerank behavior",
+      "queryType": "similarity",
+      "expected": {
+        "acceptableFiles": [
+          "tests/retrieval-ranking.test.ts",
+          "tests/search-integration.test.ts"
+        ]
+      }
+    },
+    {
+      "id": "kw-hybrid-weight-config",
+      "query": "search hybridWeight config default",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "src/config/schema.ts",
+          "README.md"
+        ]
+      }
+    },
+    {
+      "id": "kw-benchmark-baseline-artifact",
+      "query": "retrieval baseline candidate artifact paths",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "tests/retrieval-benchmark.test.ts",
+          "benchmarks/baselines/retrieval-baseline.json"
+        ]
+      }
+    },
+    {
+      "id": "impl-call-graph-tool",
+      "query": "call_graph tool callers and callees",
+      "queryType": "implementation-intent",
+      "expected": {
+        "filePath": "src/tools/index.ts",
+        "symbol": "call_graph"
+      }
+    }
+  ]
+}

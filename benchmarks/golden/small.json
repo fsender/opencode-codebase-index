@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "name": "small",
+  "description": "Smoke-sized golden eval set for retrieval quality checks.",
+  "queries": [
+    {
+      "id": "def-rank-hybrid-results",
+      "query": "where is rankHybridResults implementation",
+      "queryType": "definition",
+      "expected": {
+        "filePath": "src/indexer/index.ts",
+        "symbol": "rankHybridResults"
+      }
+    },
+    {
+      "id": "impl-codebase-search-tool",
+      "query": "find implementation of codebase_search tool",
+      "queryType": "implementation-intent",
+      "expected": {
+        "filePath": "src/tools/index.ts",
+        "symbol": "codebase_search"
+      }
+    },
+    {
+      "id": "sim-find-similar",
+      "query": "find similar code feature and duplicates",
+      "queryType": "similarity",
+      "expected": {
+        "filePath": "src/tools/index.ts",
+        "symbol": "find_similar"
+      }
+    },
+    {
+      "id": "kw-search-config-knobs",
+      "query": "fusionStrategy hybridWeight rrfK rerankTopN",
+      "queryType": "keyword-heavy",
+      "expected": {
+        "acceptableFiles": [
+          "src/config/schema.ts",
+          "src/indexer/index.ts"
+        ]
+      }
+    }
+  ]
+}

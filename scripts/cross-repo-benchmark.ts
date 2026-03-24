@@ -2,7 +2,6 @@
 
 import { execFile } from "child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
-import * as os from "os";
 import * as path from "path";
 import { performance } from "perf_hooks";
 import { promisify } from "util";
@@ -69,6 +68,7 @@ interface CliOptions {
   repos: string[];
   outputRoot: string;
   reindex: boolean;
+  repeats: number;
   skipRipgrep: boolean;
   skipSg: boolean;
 }
@@ -122,16 +122,21 @@ function printUsage(): void {
 npx tsx scripts/cross-repo-benchmark.ts [--repos /path/a,/path/b] [--output benchmarks/results/cross-repo] [--reindex|--no-reindex] [--skip-ripgrep] [--skip-sg]
 
 Defaults:
-  repos: ~/dev/git/demo-repos/{axios,express}
+  repos: none (required via --repos or BENCHMARK_REPOS)
   output: benchmarks/results/cross-repo
-  reindex: true
+  reindex: false
+  repeats: 1
 `);
 }
 
 function expandHome(input: string): string {
-  if (input === "~") return os.homedir();
+  const home = process.env.HOME;
+  if (!home) {
+    return input;
+  }
+  if (input === "~") return home;
   if (input.startsWith("~/")) {
-    return path.join(os.homedir(), input.slice(2));
+    return path.join(home, input.slice(2));
   }
   return input;
 }
@@ -153,15 +158,21 @@ function toRepoName(repoPath: string): string {
 }
 
 function parseCliArgs(argv: string[]): CliOptions {
-  const defaultRepos = ["axios", "express"].map((repo) =>
-    path.join(os.homedir(), "dev", "git", "demo-repos", repo)
-  );
-
-  let repos = [...defaultRepos];
+  let repos: string[] = [];
   let outputRoot = path.resolve(process.cwd(), "benchmarks/results/cross-repo");
-  let reindex = true;
+  let reindex = false;
+  let repeats = 1;
   let skipRipgrep = false;
   let skipSg = false;
+
+  const envRepos = process.env.BENCHMARK_REPOS;
+  if (envRepos && envRepos.trim().length > 0) {
+    repos = envRepos
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .map((item) => path.resolve(expandHome(item)));
+  }
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -209,6 +220,20 @@ function parseCliArgs(argv: string[]): CliOptions {
       continue;
     }
 
+    if (arg === "--repeats") {
+      const value = argv[i + 1];
+      if (!value) {
+        throw new Error("--repeats requires an integer value");
+      }
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        throw new Error("--repeats must be an integer >= 1");
+      }
+      repeats = parsed;
+      i += 1;
+      continue;
+    }
+
     if (arg === "--skip-sg") {
       skipSg = true;
       continue;
@@ -217,12 +242,70 @@ function parseCliArgs(argv: string[]): CliOptions {
     throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (repos.length === 0) {
+    throw new Error("No repositories configured. Pass --repos /path/a,/path/b or set BENCHMARK_REPOS");
+  }
+
   return {
     repos,
     outputRoot,
     reindex,
+    repeats,
     skipRipgrep,
     skipSg,
+  };
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+  return sorted[middle];
+}
+
+function medianMetrics(metricsList: EvalMetrics[]): EvalMetrics {
+  if (metricsList.length === 0) {
+    return averageMetrics([]);
+  }
+
+  return {
+    hitAt1: median(metricsList.map((item) => item.hitAt1)),
+    hitAt3: median(metricsList.map((item) => item.hitAt3)),
+    hitAt5: median(metricsList.map((item) => item.hitAt5)),
+    hitAt10: median(metricsList.map((item) => item.hitAt10)),
+    mrrAt10: median(metricsList.map((item) => item.mrrAt10)),
+    ndcgAt10: median(metricsList.map((item) => item.ndcgAt10)),
+    latencyMs: {
+      p50: median(metricsList.map((item) => item.latencyMs.p50)),
+      p95: median(metricsList.map((item) => item.latencyMs.p95)),
+      p99: median(metricsList.map((item) => item.latencyMs.p99)),
+    },
+    tokenEstimate: {
+      queryTokens: Math.round(median(metricsList.map((item) => item.tokenEstimate.queryTokens))),
+      embeddingTokensUsed: Math.round(
+        median(metricsList.map((item) => item.tokenEstimate.embeddingTokensUsed))
+      ),
+    },
+    embedding: {
+      callCount: Math.round(median(metricsList.map((item) => item.embedding.callCount))),
+      estimatedCostUsd: median(metricsList.map((item) => item.embedding.estimatedCostUsd)),
+      costPer1MTokensUsd: median(metricsList.map((item) => item.embedding.costPer1MTokensUsd)),
+    },
+    failureBuckets: {
+      "wrong-file": Math.round(median(metricsList.map((item) => item.failureBuckets["wrong-file"]))),
+      "wrong-symbol": Math.round(
+        median(metricsList.map((item) => item.failureBuckets["wrong-symbol"]))
+      ),
+      "docs-tests-outranking-source": Math.round(
+        median(metricsList.map((item) => item.failureBuckets["docs-tests-outranking-source"]))
+      ),
+      "no-relevant-hit-top-k": Math.round(
+        median(metricsList.map((item) => item.failureBuckets["no-relevant-hit-top-k"]))
+      ),
+    },
   };
 }
 
@@ -640,9 +723,8 @@ async function runRipgrepBaseline(
   repoPath: string,
   dataset: GoldenDataset
 ): Promise<{ metrics: EvalMetrics; perQuery: PerQueryEvalResult[] }> {
-  const perQuery: PerQueryEvalResult[] = [];
-
-  for (const query of dataset.queries) {
+  const perQuery = await Promise.all(
+    dataset.queries.map(async (query) => {
     const pattern = buildRipgrepPattern(query);
     const start = performance.now();
 
@@ -673,8 +755,9 @@ async function runRipgrepBaseline(
       name: undefined,
     }));
 
-    perQuery.push(buildPerQueryResult(query, results, elapsed, 10));
-  }
+      return buildPerQueryResult(query, results, elapsed, 10);
+    })
+  );
 
   const metrics = computeEvalMetrics(dataset.queries, perQuery, 0, 0, 0);
   return { metrics, perQuery };
@@ -684,9 +767,8 @@ async function runSgBaseline(
   repoPath: string,
   dataset: GoldenDataset
 ): Promise<{ metrics: EvalMetrics; perQuery: PerQueryEvalResult[] }> {
-  const perQuery: PerQueryEvalResult[] = [];
-
-  for (const query of dataset.queries) {
+  const perQuery = await Promise.all(
+    dataset.queries.map(async (query) => {
     const pattern = query.expected.symbol ?? query.query.split(/\s+/).find((part) => /^[A-Za-z_$][A-Za-z0-9_$]{2,}$/.test(part)) ?? query.query;
     const start = performance.now();
 
@@ -717,8 +799,9 @@ async function runSgBaseline(
       name: undefined,
     }));
 
-    perQuery.push(buildPerQueryResult(query, results, elapsed, 10));
-  }
+      return buildPerQueryResult(query, results, elapsed, 10);
+    })
+  );
 
   const metrics = computeEvalMetrics(dataset.queries, perQuery, 0, 0, 0);
   return { metrics, perQuery };
@@ -846,6 +929,7 @@ function buildReportMarkdown(
   lines.push(`- Generated at: ${runAt}`);
   lines.push(`- Output directory: ${runDir}`);
   lines.push(`- Reindex: ${options.reindex}`);
+  lines.push(`- Repeats: ${options.repeats} (median aggregation)`);
   lines.push(`- Ripgrep baseline: ${options.skipRipgrep ? "skipped" : "enabled"}`);
   lines.push(`- ast-grep baseline: ${options.skipSg ? "skipped" : "enabled"}`);
   lines.push("");
@@ -928,15 +1012,42 @@ async function runForRepo(
     writeDataset(datasetPath, dataset);
 
     const pluginOutputRoot = path.join(runDir, "plugin", repoName);
-    const runOptions: EvalRunOptions = {
-      projectRoot: repoPath,
-      datasetPath,
-      outputRoot: pluginOutputRoot,
-      ciMode: false,
-      reindex: options.reindex,
-    };
+    const pluginRuns: EvalMetrics[] = [];
+    const ripgrepRuns: EvalMetrics[] = [];
+    const sgRuns: EvalMetrics[] = [];
+    let lastPluginResult: Awaited<ReturnType<typeof runEvaluation>> | null = null;
+    let lastRipgrepQueryCount = 0;
+    let lastSgQueryCount = 0;
 
-    const pluginResult = await runEvaluation(runOptions);
+    for (let repeat = 0; repeat < options.repeats; repeat += 1) {
+      const runOptions: EvalRunOptions = {
+        projectRoot: repoPath,
+        datasetPath,
+        outputRoot: pluginOutputRoot,
+        ciMode: false,
+        reindex: options.reindex,
+      };
+
+      const pluginResult = await runEvaluation(runOptions);
+      lastPluginResult = pluginResult;
+      pluginRuns.push(pluginResult.summary.metrics);
+
+      if (!options.skipRipgrep) {
+        const ripgrepResult = await runRipgrepBaseline(repoPath, dataset);
+        ripgrepRuns.push(ripgrepResult.metrics);
+        lastRipgrepQueryCount = ripgrepResult.perQuery.length;
+      }
+
+      if (!options.skipSg) {
+        const sgResult = await runSgBaseline(repoPath, dataset);
+        sgRuns.push(sgResult.metrics);
+        lastSgQueryCount = sgResult.perQuery.length;
+      }
+    }
+
+    if (!lastPluginResult) {
+      throw new Error("No plugin results collected");
+    }
 
     const result: RepoBenchmarkResult = {
       repoName,
@@ -944,26 +1055,24 @@ async function runForRepo(
       datasetPath,
       datasetQueryCount: dataset.queries.length,
       plugin: {
-        outputDir: pluginResult.outputDir,
-        summaryPath: path.join(pluginResult.outputDir, "summary.json"),
-        perQueryPath: path.join(pluginResult.outputDir, "per-query.json"),
-        metrics: pluginResult.summary.metrics,
+        outputDir: lastPluginResult.outputDir,
+        summaryPath: path.join(lastPluginResult.outputDir, "summary.json"),
+        perQueryPath: path.join(lastPluginResult.outputDir, "per-query.json"),
+        metrics: medianMetrics(pluginRuns),
       },
     };
 
-    if (!options.skipRipgrep) {
-      const ripgrepResult = await runRipgrepBaseline(repoPath, dataset);
+    if (!options.skipRipgrep && ripgrepRuns.length > 0) {
       result.ripgrep = {
-        metrics: ripgrepResult.metrics,
-        perQueryCount: ripgrepResult.perQuery.length,
+        metrics: medianMetrics(ripgrepRuns),
+        perQueryCount: lastRipgrepQueryCount,
       };
     }
 
-    if (!options.skipSg) {
-      const sgResult = await runSgBaseline(repoPath, dataset);
+    if (!options.skipSg && sgRuns.length > 0) {
       result.sg = {
-        metrics: sgResult.metrics,
-        perQueryCount: sgResult.perQuery.length,
+        metrics: medianMetrics(sgRuns),
+        perQueryCount: lastSgQueryCount,
       };
     }
 
@@ -1040,6 +1149,7 @@ async function main(): Promise<void> {
       repos: resolvedRepos,
       outputRoot: options.outputRoot,
       reindex: options.reindex,
+      repeats: options.repeats,
       skipRipgrep: options.skipRipgrep,
       skipSg: options.skipSg,
     },

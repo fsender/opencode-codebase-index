@@ -468,6 +468,47 @@ Each run writes:
 
 Full docs: `docs/evaluation.md`
 
+### Cross-repo benchmark results snapshot
+
+Recent representative runs (plugin vs `ripgrep` vs `ast-grep`) on two medium repos:
+
+Methodology for the snapshot below:
+
+- Dataset: auto-generated cross-repo golden sets for `axios` + `express`
+- Repeats: **20** per mode
+- Aggregation: **median** metric per tool (then averaged across repos)
+
+#### Without reindex (`--no-reindex`, default)
+
+| Metric | Plugin | ripgrep | ast-grep |
+|---|---:|---:|---:|
+| Hit@5 | 50% | 5% | 50% |
+| MRR@10 | 0.4750 | 0.0454 | 0.4750 |
+| nDCG@10 | 0.4815 | 0.0805 | 0.4815 |
+| Latency p50 (ms) | 17.92 | 38.12 | 206.75 |
+| Latency p95 (ms) | 30.20 | 45.98 | 236.16 |
+
+#### With reindex (`--reindex`)
+
+| Metric | Plugin | ripgrep | ast-grep |
+|---|---:|---:|---:|
+| Hit@5 | 50% | 10% | 50% |
+| MRR@10 | 0.4750 | 0.0406 | 0.4750 |
+| nDCG@10 | 0.4815 | 0.0677 | 0.4815 |
+| Latency p50 (ms) | 15.29 | 35.00 | 196.28 |
+| Latency p95 (ms) | 83.34 | 42.95 | 222.96 |
+
+Interpretation:
+
+- Plugin and ast-grep are close on top-k relevance in this sample.
+- Plugin leads on rank-sensitive quality (MRR/nDCG) vs both baselines.
+- ripgrep remains a useful speed-oriented lexical baseline but has significantly lower retrieval relevance in these intent-style queries.
+- Even with median-of-20 aggregation, latency remains sensitive to cache state, process scheduling, and benchmark execution mode. Reindex is not a guaranteed speedup for rg/sg baselines.
+
+For reproducible setup and commands (including with/without reindex), see:
+
+- `docs/benchmarking-cross-repo.md`
+
 ### Embedding Providers
 The plugin automatically detects available credentials in this order:
 1. **GitHub Copilot** (Free if you have it)

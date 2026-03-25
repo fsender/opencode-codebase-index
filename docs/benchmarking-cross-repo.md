@@ -81,6 +81,7 @@ Ast-grep baseline scope:
 
 - Only `definition` and `keyword-heavy` query types are included for `sg` baseline comparisons.
 - This avoids scoring ast-grep against non-structural natural-language query types that are outside AST pattern matching semantics.
+- sg metrics are computed on this scoped subset only; report output includes the scoped denominator (`scoped/total`) for transparency.
 
 ## Output artifacts
 

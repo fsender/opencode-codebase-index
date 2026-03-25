@@ -479,6 +479,7 @@ Methodology for the snapshot below:
 - Aggregation: **median** metric per tool (then averaged across repos)
 - Reindex behavior: when enabled, index reset applies on repeat #1 only; subsequent repeats measure warm-index query behavior
 - Sampling note: repository parsing can be capped; benchmark reports include truncation metadata
+- ast-grep scope note: sg metrics are computed on its compatible query subset (`definition`, `keyword-heavy`) with scoped denominators shown in run reports
 
 #### Without reindex (`--no-reindex`, default)
 

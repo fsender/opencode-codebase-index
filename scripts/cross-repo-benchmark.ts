@@ -125,6 +125,8 @@ interface RepoBenchmarkResult {
     perQueryCount: number;
     repeatMetrics: EvalMetrics[];
     queryTypeScope: GoldenQueryType[];
+    scopedQueryCount: number;
+    totalQueryCount: number;
   };
   error?: string;
 }
@@ -824,7 +826,13 @@ async function runRipgrepBaseline(
 async function runSgBaseline(
   repoPath: string,
   dataset: GoldenDataset
-): Promise<{ metrics: EvalMetrics; perQuery: PerQueryEvalResult[] }> {
+): Promise<{
+  metrics: EvalMetrics;
+  perQuery: PerQueryEvalResult[];
+  scopedQueryCount: number;
+  totalQueryCount: number;
+  queryTypeScope: GoldenQueryType[];
+}> {
   const queryTypeScope: GoldenQueryType[] = ["definition", "keyword-heavy"];
   const supportedLanguages = new Map<string, string>([
     [".ts", "typescript"],
@@ -871,11 +879,10 @@ async function runSgBaseline(
     return supportedLanguages.get(ext);
   };
 
+  const scopedQueries = dataset.queries.filter((query) => queryTypeScope.includes(query.queryType));
+
   const perQuery = await Promise.all(
-    dataset.queries.map(async (query) => {
-      if (!queryTypeScope.includes(query.queryType)) {
-        return buildPerQueryResult(query, [], 0, 10);
-      }
+    scopedQueries.map(async (query) => {
 
       const pattern = extractPattern(query);
       const lang = inferLanguage(query);
@@ -920,8 +927,14 @@ async function runSgBaseline(
     })
   );
 
-  const metrics = computeEvalMetrics(dataset.queries, perQuery, 0, 0, 0);
-  return { metrics, perQuery };
+  const metrics = computeEvalMetrics(scopedQueries, perQuery, 0, 0, 0);
+  return {
+    metrics,
+    perQuery,
+    scopedQueryCount: scopedQueries.length,
+    totalQueryCount: dataset.queries.length,
+    queryTypeScope,
+  };
 }
 
 function averageMetrics(metricsList: EvalMetrics[]): EvalMetrics {
@@ -1070,6 +1083,12 @@ function buildReportMarkdown(
       continue;
     }
 
+    if (result.sg) {
+      lines.push(
+        `- ast-grep scope: ${result.sg.queryTypeScope.join(", ")} (${result.sg.scopedQueryCount}/${result.sg.totalQueryCount} queries scored)`
+      );
+    }
+
     lines.push("| Metric | Plugin | Ripgrep | ast-grep |");
     lines.push("|---|---:|---:|---:|");
 
@@ -1156,6 +1175,9 @@ async function runForRepo(
     let lastPluginResult: Awaited<ReturnType<typeof runEvaluation>> | null = null;
     let lastRipgrepQueryCount = 0;
     let lastSgQueryCount = 0;
+    let lastSgScopedQueryCount = 0;
+    let lastSgTotalQueryCount = dataset.queries.length;
+    let lastSgQueryTypeScope: GoldenQueryType[] = ["definition", "keyword-heavy"];
 
     for (let repeat = 0; repeat < options.repeats; repeat += 1) {
       const reindexApplied = options.reindex && repeat === 0;
@@ -1189,6 +1211,9 @@ async function runForRepo(
         const sgResult = await runSgBaseline(repoPath, dataset);
         sgRuns.push(sgResult.metrics);
         lastSgQueryCount = sgResult.perQuery.length;
+        lastSgScopedQueryCount = sgResult.scopedQueryCount;
+        lastSgTotalQueryCount = sgResult.totalQueryCount;
+        lastSgQueryTypeScope = sgResult.queryTypeScope;
       }
     }
 
@@ -1229,7 +1254,9 @@ async function runForRepo(
         metrics: medianMetrics(sgRuns),
         perQueryCount: lastSgQueryCount,
         repeatMetrics: sgRuns,
-        queryTypeScope: ["definition", "keyword-heavy"],
+        queryTypeScope: lastSgQueryTypeScope,
+        scopedQueryCount: lastSgScopedQueryCount,
+        totalQueryCount: lastSgTotalQueryCount,
       };
     }
 

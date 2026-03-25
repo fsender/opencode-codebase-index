@@ -1069,6 +1069,24 @@ function buildReportMarkdown(
   );
   lines.push("");
 
+  const aggregateSgHeaderLabel = (() => {
+    const scopedCounts = repoResults
+      .map((result) => result.sg)
+      .filter((result): result is NonNullable<RepoBenchmarkResult["sg"]> => result !== undefined)
+      .map((result) => `${result.scopedQueryCount}/${result.totalQueryCount}`);
+
+    if (scopedCounts.length === 0) {
+      return "ast-grep";
+    }
+
+    const uniqueScopedCounts = [...new Set(scopedCounts)];
+    if (uniqueScopedCounts.length === 1) {
+      return `ast-grep (${uniqueScopedCounts[0]} queries)`;
+    }
+
+    return "ast-grep (scoped queries)";
+  })();
+
   for (const result of repoResults) {
     lines.push(`## ${result.repoName}`);
     lines.push("");
@@ -1089,7 +1107,11 @@ function buildReportMarkdown(
       );
     }
 
-    lines.push("| Metric | Plugin | Ripgrep | ast-grep |");
+    const repoSgHeaderLabel = result.sg
+      ? `ast-grep (${result.sg.scopedQueryCount}/${result.sg.totalQueryCount} queries)`
+      : "ast-grep";
+
+    lines.push(`| Metric | Plugin | Ripgrep | ${repoSgHeaderLabel} |`);
     lines.push("|---|---:|---:|---:|");
 
     const rgMetrics = result.ripgrep?.metrics;
@@ -1115,7 +1137,7 @@ function buildReportMarkdown(
 
   lines.push("## Aggregate (Median per repo, then average across repos)");
   lines.push("");
-  lines.push("| Metric | Plugin | Ripgrep | ast-grep |");
+  lines.push(`| Metric | Plugin | Ripgrep | ${aggregateSgHeaderLabel} |`);
   lines.push("|---|---:|---:|---:|");
   lines.push(`| Hit@1 | ${pct(pluginAggregate.hitAt1)} | ${ripgrepAggregate ? pct(ripgrepAggregate.hitAt1) : "N/A"} | ${sgAggregate ? pct(sgAggregate.hitAt1) : "N/A"} |`);
   lines.push(`| Hit@3 | ${pct(pluginAggregate.hitAt3)} | ${ripgrepAggregate ? pct(ripgrepAggregate.hitAt3) : "N/A"} | ${sgAggregate ? pct(sgAggregate.hitAt3) : "N/A"} |`);

@@ -483,7 +483,7 @@ Methodology for the snapshot below:
 
 #### Without reindex (`--no-reindex`, default)
 
-| Metric | Plugin | ripgrep | ast-grep† |
+| Metric | Plugin | ripgrep | ast-grep (5/10 queries) |
 |---|---:|---:|---:|
 | Hit@5 | 50% | 5% | 100% |
 | MRR@10 | 0.48 | 0.04 | 0.90 |
@@ -493,7 +493,7 @@ Methodology for the snapshot below:
 
 #### With reindex (`--reindex`)
 
-| Metric | Plugin | ripgrep | ast-grep† |
+| Metric | Plugin | ripgrep | ast-grep (5/10 queries) |
 |---|---:|---:|---:|
 | Hit@5 | 50% | 5% | 100% |
 | MRR@10 | 0.48 | 0.04 | 0.98 |
@@ -501,7 +501,7 @@ Methodology for the snapshot below:
 | Latency p50 (ms) | 17.1 | 35.9 | 69.1 |
 | Latency p95 (ms) | 30.4 | 43.7 | 75.1 |
 
-†ast-grep metrics are computed on its compatible query subset only (`definition` + `keyword-heavy`, 5/10 queries per repo). Plugin and ripgrep are scored on all 10 queries.
+ast-grep metrics are computed on its compatible query subset only (`definition` + `keyword-heavy`, 5/10 queries per repo). Plugin and ripgrep are scored on all 10 queries.
 
 Interpretation:
 

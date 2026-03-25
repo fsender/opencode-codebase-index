@@ -41,7 +41,7 @@ npx tsx scripts/cross-repo-benchmark.ts
 ## Reindex modes
 
 - Default: `--no-reindex` behavior (fast iteration, reuses existing index)
-- Clean run: `--reindex` (rebuild index for reproducible baseline)
+- `--reindex` applies on repeat #1 only, then repeat runs measure query-time behavior on a warm index
 
 Examples:
 
@@ -51,7 +51,21 @@ npx tsx scripts/cross-repo-benchmark.ts --repos /path/to/repo1,/path/to/repo2
 
 # Clean baseline
 npx tsx scripts/cross-repo-benchmark.ts --repos /path/to/repo1,/path/to/repo2 --reindex
+
+# Repeat runs for stable medians (recommended)
+npx tsx scripts/cross-repo-benchmark.ts --repos /path/to/repo1,/path/to/repo2 --repeats 20
 ```
+
+## Sampling and mutability notes
+
+- By default, generated datasets are written under each run output directory (`<run>/datasets/`) to keep committed benchmark inputs immutable.
+- Persist generated datasets to `benchmarks/golden/cross-repo/` only when explicitly needed:
+
+```bash
+npx tsx scripts/cross-repo-benchmark.ts --repos /path/to/repo1,/path/to/repo2 --persist-datasets
+```
+
+- File parsing is capped (`--max-parse-files`, default `2500`). Reports include whether truncation occurred.
 
 ## Optional baseline toggles
 
@@ -63,6 +77,11 @@ npx tsx scripts/cross-repo-benchmark.ts --repos /path/to/repo1,/path/to/repo2 --
 npx tsx scripts/cross-repo-benchmark.ts --repos /path/to/repo1,/path/to/repo2 --skip-sg
 ```
 
+Ast-grep baseline scope:
+
+- Only `definition` and `keyword-heavy` query types are included for `sg` baseline comparisons.
+- This avoids scoring ast-grep against non-structural natural-language query types that are outside AST pattern matching semantics.
+
 ## Output artifacts
 
 Each run writes to:
@@ -70,7 +89,8 @@ Each run writes to:
 - `benchmarks/results/cross-repo/<timestamp>/report.md`
 - `benchmarks/results/cross-repo/<timestamp>/report.json`
 - `benchmarks/results/cross-repo/<timestamp>/repos/<repo>.json`
+- `benchmarks/results/cross-repo/<timestamp>/datasets/<repo>.json`
 
-Auto-generated dataset files are written to:
+When `--persist-datasets` is set, auto-generated dataset files are also written to:
 
 - `benchmarks/golden/cross-repo/<repo>.json`

@@ -477,14 +477,16 @@ Methodology for the snapshot below:
 - Dataset: auto-generated cross-repo golden sets for `axios` + `express`
 - Repeats: **20** per mode
 - Aggregation: **median** metric per tool (then averaged across repos)
+- Reindex behavior: when enabled, index reset applies on repeat #1 only; subsequent repeats measure warm-index query behavior
+- Sampling note: repository parsing can be capped; benchmark reports include truncation metadata
 
 #### Without reindex (`--no-reindex`, default)
 
 | Metric | Plugin | ripgrep | ast-grep |
 |---|---:|---:|---:|
 | Hit@5 | 50% | 5% | 50% |
-| MRR@10 | 0.4750 | 0.0454 | 0.4750 |
-| nDCG@10 | 0.4815 | 0.0805 | 0.4815 |
+| MRR@10 | 0.48 | 0.045 | 0.48 |
+| nDCG@10 | 0.48 | 0.081 | 0.48 |
 | Latency p50 (ms) | 17.92 | 38.12 | 206.75 |
 | Latency p95 (ms) | 30.20 | 45.98 | 236.16 |
 
@@ -493,8 +495,8 @@ Methodology for the snapshot below:
 | Metric | Plugin | ripgrep | ast-grep |
 |---|---:|---:|---:|
 | Hit@5 | 50% | 10% | 50% |
-| MRR@10 | 0.4750 | 0.0406 | 0.4750 |
-| nDCG@10 | 0.4815 | 0.0677 | 0.4815 |
+| MRR@10 | 0.48 | 0.041 | 0.48 |
+| nDCG@10 | 0.48 | 0.068 | 0.48 |
 | Latency p50 (ms) | 15.29 | 35.00 | 196.28 |
 | Latency p95 (ms) | 83.34 | 42.95 | 222.96 |
 
@@ -504,6 +506,7 @@ Interpretation:
 - Plugin leads on rank-sensitive quality (MRR/nDCG) vs both baselines.
 - ripgrep remains a useful speed-oriented lexical baseline but has significantly lower retrieval relevance in these intent-style queries.
 - Even with median-of-20 aggregation, latency remains sensitive to cache state, process scheduling, and benchmark execution mode. Reindex is not a guaranteed speedup for rg/sg baselines.
+- Reported numbers are rounded to avoid false precision; use report artifacts for full per-repeat audit trails.
 
 For reproducible setup and commands (including with/without reindex), see:
 

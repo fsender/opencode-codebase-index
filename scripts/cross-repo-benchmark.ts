@@ -69,8 +69,16 @@ interface CliOptions {
   outputRoot: string;
   reindex: boolean;
   repeats: number;
+  maxParseFiles: number;
+  persistDatasets: boolean;
   skipRipgrep: boolean;
   skipSg: boolean;
+}
+
+interface FileCollectionResult {
+  files: string[];
+  truncated: boolean;
+  maxParseFiles: number;
 }
 
 interface SymbolCandidate {
@@ -87,19 +95,36 @@ interface RepoBenchmarkResult {
   repoPath: string;
   datasetPath: string;
   datasetQueryCount: number;
+  fileSampling: {
+    parsedFileCount: number;
+    truncated: boolean;
+    maxParseFiles: number;
+    fileSizeLimitBytes: number;
+  };
   plugin: {
     outputDir: string;
     summaryPath: string;
     perQueryPath: string;
     metrics: EvalMetrics;
+    repeatSummaries: Array<{
+      repeat: number;
+      outputDir: string;
+      summaryPath: string;
+      perQueryPath: string;
+      metrics: EvalMetrics;
+      reindexApplied: boolean;
+    }>;
   };
   ripgrep?: {
     metrics: EvalMetrics;
     perQueryCount: number;
+    repeatMetrics: EvalMetrics[];
   };
   sg?: {
     metrics: EvalMetrics;
     perQueryCount: number;
+    repeatMetrics: EvalMetrics[];
+    queryTypeScope: GoldenQueryType[];
   };
   error?: string;
 }
@@ -119,13 +144,15 @@ interface RipgrepJsonEvent {
 
 function printUsage(): void {
   console.log(`Usage:
-npx tsx scripts/cross-repo-benchmark.ts [--repos /path/a,/path/b] [--output benchmarks/results/cross-repo] [--reindex|--no-reindex] [--skip-ripgrep] [--skip-sg]
+npx tsx scripts/cross-repo-benchmark.ts [--repos /path/a,/path/b] [--output benchmarks/results/cross-repo] [--reindex|--no-reindex] [--repeats N] [--max-parse-files N] [--persist-datasets] [--skip-ripgrep] [--skip-sg]
 
 Defaults:
   repos: none (required via --repos or BENCHMARK_REPOS)
   output: benchmarks/results/cross-repo
   reindex: false
   repeats: 1
+  max-parse-files: 2500
+  persist-datasets: false
 `);
 }
 
@@ -162,6 +189,8 @@ function parseCliArgs(argv: string[]): CliOptions {
   let outputRoot = path.resolve(process.cwd(), "benchmarks/results/cross-repo");
   let reindex = false;
   let repeats = 1;
+  let maxParseFiles = MAX_PARSE_FILES;
+  let persistDatasets = false;
   let skipRipgrep = false;
   let skipSg = false;
 
@@ -234,6 +263,25 @@ function parseCliArgs(argv: string[]): CliOptions {
       continue;
     }
 
+    if (arg === "--max-parse-files") {
+      const value = argv[i + 1];
+      if (!value) {
+        throw new Error("--max-parse-files requires an integer value");
+      }
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        throw new Error("--max-parse-files must be an integer >= 1");
+      }
+      maxParseFiles = parsed;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--persist-datasets") {
+      persistDatasets = true;
+      continue;
+    }
+
     if (arg === "--skip-sg") {
       skipSg = true;
       continue;
@@ -251,6 +299,8 @@ function parseCliArgs(argv: string[]): CliOptions {
     outputRoot,
     reindex,
     repeats,
+    maxParseFiles,
+    persistDatasets,
     skipRipgrep,
     skipSg,
   };
@@ -309,15 +359,18 @@ function medianMetrics(metricsList: EvalMetrics[]): EvalMetrics {
   };
 }
 
-function collectSourceFiles(repoPath: string): string[] {
+function collectSourceFiles(repoPath: string, maxParseFiles: number): FileCollectionResult {
   const files: string[] = [];
   const stack: string[] = [repoPath];
+  let truncated = false;
 
   while (stack.length > 0) {
     const current = stack.pop();
     if (!current) break;
 
-    const entries = readdirSync(current, { withFileTypes: true });
+    const entries = readdirSync(current, { withFileTypes: true }).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
     for (const entry of entries) {
       const absolutePath = path.join(current, entry.name);
 
@@ -337,13 +390,14 @@ function collectSourceFiles(repoPath: string): string[] {
       if (Buffer.byteLength(stat, "utf-8") > MAX_FILE_SIZE_BYTES) continue;
 
       files.push(absolutePath);
-      if (files.length >= MAX_PARSE_FILES) {
-        return files;
+      if (files.length >= maxParseFiles) {
+        truncated = true;
+        return { files, truncated, maxParseFiles };
       }
     }
   }
 
-  return files;
+  return { files, truncated, maxParseFiles };
 }
 
 function extractNamedExports(content: string): Set<string> {
@@ -615,8 +669,12 @@ function buildGoldenDataset(repoName: string, repoPath: string, parsedFiles: Par
   };
 }
 
-function collectParsedFiles(repoPath: string): ParsedFile[] {
-  const filePaths = collectSourceFiles(repoPath);
+function collectParsedFiles(
+  repoPath: string,
+  maxParseFiles: number
+): { parsedFiles: ParsedFile[]; collection: FileCollectionResult } {
+  const collection = collectSourceFiles(repoPath, maxParseFiles);
+  const filePaths = collection.files;
   if (filePaths.length === 0) {
     throw new Error(`No source files found for parsing in ${repoPath}`);
   }
@@ -626,7 +684,7 @@ function collectParsedFiles(repoPath: string): ParsedFile[] {
     content: readFileSync(filePath, "utf-8"),
   }));
 
-  return parseFiles(inputs);
+  return { parsedFiles: parseFiles(inputs), collection };
 }
 
 function writeDataset(datasetPath: string, dataset: GoldenDataset): void {
@@ -767,37 +825,96 @@ async function runSgBaseline(
   repoPath: string,
   dataset: GoldenDataset
 ): Promise<{ metrics: EvalMetrics; perQuery: PerQueryEvalResult[] }> {
-  const perQuery = await Promise.all(
-    dataset.queries.map(async (query) => {
-    const pattern = query.expected.symbol ?? query.query.split(/\s+/).find((part) => /^[A-Za-z_$][A-Za-z0-9_$]{2,}$/.test(part)) ?? query.query;
-    const start = performance.now();
+  const queryTypeScope: GoldenQueryType[] = ["definition", "keyword-heavy"];
+  const supportedLanguages = new Map<string, string>([
+    [".ts", "typescript"],
+    [".tsx", "tsx"],
+    [".js", "javascript"],
+    [".jsx", "jsx"],
+    [".mjs", "javascript"],
+    [".cjs", "javascript"],
+    [".py", "python"],
+    [".rs", "rust"],
+    [".go", "go"],
+    [".java", "java"],
+    [".cs", "csharp"],
+    [".rb", "ruby"],
+    [".sh", "bash"],
+    [".bash", "bash"],
+    [".c", "c"],
+    [".cpp", "cpp"],
+    [".h", "c"],
+    [".hpp", "cpp"],
+    [".json", "json"],
+    [".toml", "toml"],
+    [".yaml", "yaml"],
+    [".yml", "yaml"],
+  ]);
 
-    let stdout = "";
-    try {
-      const result = await execFileAsync("sg", ["run", "--pattern", pattern, "--json=stream", repoPath], {
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      stdout = result.stdout;
-    } catch (error: unknown) {
-      const maybe = error as { stdout?: string; code?: number };
-      if (typeof maybe.stdout === "string") {
-        stdout = maybe.stdout;
-      }
-      if (maybe.code !== 1 && maybe.code !== 0) {
-        throw error;
+  const extractPattern = (query: GoldenQuery): string | undefined => {
+    if (query.expected.symbol && /^[A-Za-z_$][A-Za-z0-9_$]{1,}$/.test(query.expected.symbol)) {
+      return query.expected.symbol;
+    }
+    for (const part of query.query.split(/\s+/)) {
+      const token = part.trim().replace(/[^A-Za-z0-9_$]/g, "");
+      if (/^[A-Za-z_$][A-Za-z0-9_$]{2,}$/.test(token)) {
+        return token;
       }
     }
+    return undefined;
+  };
 
-    const elapsed = performance.now() - start;
-    const files = parseSgEvents(stdout, repoPath);
-    const results = files.map((filePath, index) => ({
-      filePath,
-      startLine: 0,
-      endLine: 0,
-      score: 1 / (index + 1),
-      chunkType: "other",
-      name: undefined,
-    }));
+  const inferLanguage = (query: GoldenQuery): string | undefined => {
+    const candidatePath = query.expected.filePath ?? query.expected.acceptableFiles?.[0];
+    if (!candidatePath) return undefined;
+    const ext = path.extname(candidatePath).toLowerCase();
+    return supportedLanguages.get(ext);
+  };
+
+  const perQuery = await Promise.all(
+    dataset.queries.map(async (query) => {
+      if (!queryTypeScope.includes(query.queryType)) {
+        return buildPerQueryResult(query, [], 0, 10);
+      }
+
+      const pattern = extractPattern(query);
+      const lang = inferLanguage(query);
+      if (!pattern || !lang) {
+        return buildPerQueryResult(query, [], 0, 10);
+      }
+
+      const start = performance.now();
+
+      let stdout = "";
+      try {
+        const result = await execFileAsync(
+          "sg",
+          ["run", "--pattern", pattern, "--lang", lang, "--json=stream", repoPath],
+          {
+            maxBuffer: 10 * 1024 * 1024,
+          }
+        );
+        stdout = result.stdout;
+      } catch (error: unknown) {
+        const maybe = error as { stdout?: string; code?: number };
+        if (typeof maybe.stdout === "string") {
+          stdout = maybe.stdout;
+        }
+        if (maybe.code !== 1 && maybe.code !== 0) {
+          throw error;
+        }
+      }
+
+      const elapsed = performance.now() - start;
+      const files = parseSgEvents(stdout, repoPath);
+      const results = files.map((filePath, index) => ({
+        filePath,
+        startLine: 0,
+        endLine: 0,
+        score: 1 / (index + 1),
+        chunkType: "other",
+        name: undefined,
+      }));
 
       return buildPerQueryResult(query, results, elapsed, 10);
     })
@@ -913,10 +1030,6 @@ function ms(value: number): string {
   return value.toFixed(2);
 }
 
-function buildMetricTableRow(label: string, pluginValue: string, ripgrepValue: string): string {
-  return `| ${label} | ${pluginValue} | ${ripgrepValue} |`;
-}
-
 function buildReportMarkdown(
   runAt: string,
   options: CliOptions,
@@ -929,9 +1042,18 @@ function buildReportMarkdown(
   lines.push(`- Generated at: ${runAt}`);
   lines.push(`- Output directory: ${runDir}`);
   lines.push(`- Reindex: ${options.reindex}`);
+  lines.push(
+    `- Reindex application in repeats: ${options.reindex ? "applied on repeat #1 only" : "disabled"}`
+  );
   lines.push(`- Repeats: ${options.repeats} (median aggregation)`);
+  lines.push(`- File sampling cap: ${options.maxParseFiles}`);
+  lines.push(`- Persist generated datasets to benchmarks/golden/cross-repo: ${options.persistDatasets}`);
   lines.push(`- Ripgrep baseline: ${options.skipRipgrep ? "skipped" : "enabled"}`);
-  lines.push(`- ast-grep baseline: ${options.skipSg ? "skipped" : "enabled"}`);
+  lines.push(
+    `- ast-grep baseline: ${
+      options.skipSg ? "skipped" : "enabled (query types: definition, keyword-heavy)"
+    }`
+  );
   lines.push("");
 
   for (const result of repoResults) {
@@ -939,6 +1061,9 @@ function buildReportMarkdown(
     lines.push("");
     lines.push(`- Repo: ${result.repoPath}`);
     lines.push(`- Dataset: ${result.datasetPath} (${result.datasetQueryCount} queries)`);
+    lines.push(
+      `- File sampling: parsed ${result.fileSampling.parsedFileCount} files (cap=${result.fileSampling.maxParseFiles}, truncated=${result.fileSampling.truncated}, fileSizeLimit=${result.fileSampling.fileSizeLimitBytes} bytes)`
+    );
     if (result.error) {
       lines.push(`- Error: ${result.error}`);
       lines.push("");
@@ -969,7 +1094,7 @@ function buildReportMarkdown(
   const sgSuccessful = successful.filter((item) => item.sg).map((item) => item.sg?.metrics).filter((item): item is EvalMetrics => item !== undefined);
   const sgAggregate = sgSuccessful.length > 0 ? averageMetrics(sgSuccessful) : undefined;
 
-  lines.push("## Aggregate (Average Across Repos)");
+  lines.push("## Aggregate (Median per repo, then average across repos)");
   lines.push("");
   lines.push("| Metric | Plugin | Ripgrep | ast-grep |");
   lines.push("|---|---:|---:|---:|");
@@ -1001,36 +1126,58 @@ async function runForRepo(
   repoPath: string,
   options: CliOptions,
   runDir: string,
-  datasetRoot: string
+  datasetRoot: string,
+  persistentDatasetRoot: string
 ): Promise<RepoBenchmarkResult> {
   const repoName = toRepoName(repoPath);
   const datasetPath = path.join(datasetRoot, `${repoName}.json`);
+  const persistentDatasetPath = path.join(persistentDatasetRoot, `${repoName}.json`);
 
   try {
-    const parsedFiles = collectParsedFiles(repoPath);
+    const { parsedFiles, collection } = collectParsedFiles(repoPath, options.maxParseFiles);
     const dataset = buildGoldenDataset(repoName, repoPath, parsedFiles);
     writeDataset(datasetPath, dataset);
+    if (options.persistDatasets) {
+      writeDataset(persistentDatasetPath, dataset);
+    }
 
     const pluginOutputRoot = path.join(runDir, "plugin", repoName);
     const pluginRuns: EvalMetrics[] = [];
     const ripgrepRuns: EvalMetrics[] = [];
     const sgRuns: EvalMetrics[] = [];
+    const pluginRepeatSummaries: Array<{
+      repeat: number;
+      outputDir: string;
+      summaryPath: string;
+      perQueryPath: string;
+      metrics: EvalMetrics;
+      reindexApplied: boolean;
+    }> = [];
     let lastPluginResult: Awaited<ReturnType<typeof runEvaluation>> | null = null;
     let lastRipgrepQueryCount = 0;
     let lastSgQueryCount = 0;
 
     for (let repeat = 0; repeat < options.repeats; repeat += 1) {
+      const reindexApplied = options.reindex && repeat === 0;
       const runOptions: EvalRunOptions = {
         projectRoot: repoPath,
         datasetPath,
         outputRoot: pluginOutputRoot,
         ciMode: false,
-        reindex: options.reindex,
+        reindex: reindexApplied,
       };
 
       const pluginResult = await runEvaluation(runOptions);
       lastPluginResult = pluginResult;
       pluginRuns.push(pluginResult.summary.metrics);
+      pluginRepeatSummaries.push({
+        repeat: repeat + 1,
+        outputDir: pluginResult.outputDir,
+        summaryPath: path.join(pluginResult.outputDir, "summary.json"),
+        perQueryPath: path.join(pluginResult.outputDir, "per-query.json"),
+        metrics: pluginResult.summary.metrics,
+        reindexApplied,
+      });
 
       if (!options.skipRipgrep) {
         const ripgrepResult = await runRipgrepBaseline(repoPath, dataset);
@@ -1054,11 +1201,18 @@ async function runForRepo(
       repoPath,
       datasetPath,
       datasetQueryCount: dataset.queries.length,
+      fileSampling: {
+        parsedFileCount: collection.files.length,
+        truncated: collection.truncated,
+        maxParseFiles: collection.maxParseFiles,
+        fileSizeLimitBytes: MAX_FILE_SIZE_BYTES,
+      },
       plugin: {
         outputDir: lastPluginResult.outputDir,
         summaryPath: path.join(lastPluginResult.outputDir, "summary.json"),
         perQueryPath: path.join(lastPluginResult.outputDir, "per-query.json"),
         metrics: medianMetrics(pluginRuns),
+        repeatSummaries: pluginRepeatSummaries,
       },
     };
 
@@ -1066,6 +1220,7 @@ async function runForRepo(
       result.ripgrep = {
         metrics: medianMetrics(ripgrepRuns),
         perQueryCount: lastRipgrepQueryCount,
+        repeatMetrics: ripgrepRuns,
       };
     }
 
@@ -1073,6 +1228,8 @@ async function runForRepo(
       result.sg = {
         metrics: medianMetrics(sgRuns),
         perQueryCount: lastSgQueryCount,
+        repeatMetrics: sgRuns,
+        queryTypeScope: ["definition", "keyword-heavy"],
       };
     }
 
@@ -1084,11 +1241,18 @@ async function runForRepo(
       repoPath,
       datasetPath,
       datasetQueryCount: 0,
+      fileSampling: {
+        parsedFileCount: 0,
+        truncated: false,
+        maxParseFiles: options.maxParseFiles,
+        fileSizeLimitBytes: MAX_FILE_SIZE_BYTES,
+      },
       plugin: {
         outputDir: "",
         summaryPath: "",
         perQueryPath: "",
         metrics: averageMetrics([]),
+        repeatSummaries: [],
       },
       error: message,
     };
@@ -1111,11 +1275,15 @@ async function main(): Promise<void> {
 
   const runTimestamp = timestampForDir();
   const runDir = path.join(options.outputRoot, runTimestamp);
-  const datasetRoot = path.join(process.cwd(), "benchmarks", "golden", "cross-repo");
+  const datasetRoot = path.join(runDir, "datasets");
+  const persistentDatasetRoot = path.join(process.cwd(), "benchmarks", "golden", "cross-repo");
 
   ensureDir(runDir);
   ensureDir(path.join(runDir, "repos"));
   ensureDir(datasetRoot);
+  if (options.persistDatasets) {
+    ensureDir(persistentDatasetRoot);
+  }
 
   console.log(`Cross-repo benchmark run: ${runTimestamp}`);
   console.log(`Output: ${runDir}`);
@@ -1125,7 +1293,13 @@ async function main(): Promise<void> {
   for (const repoPath of resolvedRepos) {
     const repoName = toRepoName(repoPath);
     console.log(`\n[${repoName}] generating dataset + running evaluations...`);
-    const repoResult = await runForRepo(repoPath, options, runDir, datasetRoot);
+    const repoResult = await runForRepo(
+      repoPath,
+      options,
+      runDir,
+      datasetRoot,
+      persistentDatasetRoot
+    );
     results.push(repoResult);
 
     const perRepoArtifactPath = path.join(runDir, "repos", `${repoName}.json`);
@@ -1150,6 +1324,8 @@ async function main(): Promise<void> {
       outputRoot: options.outputRoot,
       reindex: options.reindex,
       repeats: options.repeats,
+      maxParseFiles: options.maxParseFiles,
+      persistDatasets: options.persistDatasets,
       skipRipgrep: options.skipRipgrep,
       skipSg: options.skipSg,
     },

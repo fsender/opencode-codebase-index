@@ -483,30 +483,32 @@ Methodology for the snapshot below:
 
 #### Without reindex (`--no-reindex`, default)
 
-| Metric | Plugin | ripgrep | ast-grep |
+| Metric | Plugin | ripgrep | ast-grep† |
 |---|---:|---:|---:|
-| Hit@5 | 50% | 5% | 50% |
-| MRR@10 | 0.48 | 0.045 | 0.48 |
-| nDCG@10 | 0.48 | 0.081 | 0.48 |
-| Latency p50 (ms) | 17.92 | 38.12 | 206.75 |
-| Latency p95 (ms) | 30.20 | 45.98 | 236.16 |
+| Hit@5 | 50% | 5% | 100% |
+| MRR@10 | 0.48 | 0.04 | 0.90 |
+| nDCG@10 | 0.48 | 0.08 | 0.93 |
+| Latency p50 (ms) | 17.5 | 36.9 | 66.6 |
+| Latency p95 (ms) | 30.9 | 44.1 | 70.7 |
 
 #### With reindex (`--reindex`)
 
-| Metric | Plugin | ripgrep | ast-grep |
+| Metric | Plugin | ripgrep | ast-grep† |
 |---|---:|---:|---:|
-| Hit@5 | 50% | 10% | 50% |
-| MRR@10 | 0.48 | 0.041 | 0.48 |
-| nDCG@10 | 0.48 | 0.068 | 0.48 |
-| Latency p50 (ms) | 15.29 | 35.00 | 196.28 |
-| Latency p95 (ms) | 83.34 | 42.95 | 222.96 |
+| Hit@5 | 50% | 5% | 100% |
+| MRR@10 | 0.48 | 0.04 | 0.98 |
+| nDCG@10 | 0.48 | 0.07 | 0.98 |
+| Latency p50 (ms) | 17.1 | 35.9 | 69.1 |
+| Latency p95 (ms) | 30.4 | 43.7 | 75.1 |
+
+†ast-grep metrics are computed on its compatible query subset only (`definition` + `keyword-heavy`, 5/10 queries per repo). Plugin and ripgrep are scored on all 10 queries.
 
 Interpretation:
 
-- Plugin and ast-grep are close on top-k relevance in this sample.
-- Plugin leads on rank-sensitive quality (MRR/nDCG) vs both baselines.
-- ripgrep remains a useful speed-oriented lexical baseline but has significantly lower retrieval relevance in these intent-style queries.
-- Even with median-of-20 aggregation, latency remains sensitive to cache state, process scheduling, and benchmark execution mode. Reindex is not a guaranteed speedup for rg/sg baselines.
+- ast-grep dominates on its scoped subset (structural definition queries), but only handles 50% of query types. Plugin handles all query types including natural language.
+- Plugin leads on rank-sensitive quality (MRR/nDCG) vs ripgrep across all query types.
+- ripgrep remains a useful speed-oriented lexical baseline but has significantly lower retrieval relevance for intent-style queries.
+- Plugin is the fastest tool at p50 (~17ms), ahead of ripgrep (~36ms) and ast-grep (~67ms).
 - Reported numbers are rounded to avoid false precision; use report artifacts for full per-repeat audit trails.
 
 For reproducible setup and commands (including with/without reindex), see:

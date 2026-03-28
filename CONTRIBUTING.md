@@ -111,9 +111,13 @@ cd native && cargo clippy
    - `chore:` - Maintenance tasks
 
 5. **Push and open a pull request**:
-   ```bash
-   git push origin feature/my-feature
-   ```
+    ```bash
+    git push origin feature/my-feature
+    ```
+
+### Adding a new language?
+
+If you're contributing parser or call-graph support for a new language, use [`docs/adding-language-support.md`](./docs/adding-language-support.md). It explains the difference between file discovery, semantic parsing, and call-graph support, and lists every code path you may need to update.
 
 ## Pull Request Guidelines
 

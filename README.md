@@ -649,6 +649,8 @@ Be aware of these characteristics:
 
 For contribution workflow, standards, and release-label requirements, see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
+If you want to add support for a new language, see [`docs/adding-language-support.md`](./docs/adding-language-support.md) for the full Rust + TypeScript checklist.
+
 Quick path:
 
 1. Fork + branch

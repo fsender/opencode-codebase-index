@@ -100,7 +100,7 @@ Use the same semantic search from any MCP-compatible client. Index once, search 
    npx opencode-codebase-index-mcp                            # uses current directory
    ```
 
-The MCP server exposes all 10 tools (`codebase_search`, `codebase_peek`, `implementation_lookup`, `find_similar`, `call_graph`, `index_codebase`, `index_status`, `index_health_check`, `index_metrics`, `index_logs`) and 5 prompts (`search`, `find`, `definition`, `index`, `status`).
+The MCP server exposes all 9 tools (`codebase_search`, `codebase_peek`, `find_similar`, `call_graph`, `index_codebase`, `index_status`, `index_health_check`, `index_metrics`, `index_logs`) and 4 prompts (`search`, `find`, `index`, `status`).
 
 The MCP dependencies (`@modelcontextprotocol/sdk`, `zod`) are optional peer dependencies — they're only needed if you use the MCP server.
 
@@ -128,7 +128,6 @@ src/api/checkout.ts:89      (Route handler for /pay)
 | Scenario | Tool | Why |
 |----------|------|-----|
 | Don't know the function name | `codebase_search` | Semantic search finds by meaning |
-| Need the authoritative definition site | `implementation_lookup` | Returns the best source definition/implementation, not broad discovery results |
 | Exploring unfamiliar codebase | `codebase_search` | Discovers related code across files |
 | Just need to find locations | `codebase_peek` | Returns metadata only, saves ~90% tokens |
 | Understand code flow | `call_graph` | Find callers/callees of any function |
@@ -271,13 +270,6 @@ The plugin exposes these tools to the OpenCode agent:
   ```
 - **Workflow**: `codebase_peek` → find locations → `Read` specific files
 
-### `implementation_lookup`
-**Authoritative definition lookup.** Returns the best source definition/implementation for a symbol or implementation-intent query.
-- **Use for**: "Where is X defined/implemented?" when you want the real source location, not broad semantic discovery.
-- **Behavior**: Reuses the existing definition-intent ranking path, prefers implementation files over tests/docs/fixtures/benchmarks, preserves documentation-intent behavior on generic search surfaces, and supports path narrowing via query hints like `in src/foo.ts`.
-- **Example**: `implementation_lookup(query="validateToken")`
-- **Workflow**: `implementation_lookup` → inspect the returned authoritative definition → optionally `Read` the file for more surrounding context
-
 ### `find_similar`
 Find code similar to a provided snippet.
 - **Use for**: Duplicate detection, refactor prep, pattern mining.
@@ -314,7 +306,6 @@ The plugin automatically registers these slash commands:
 
 | Command | Description |
 | ------- | ----------- |
-| `/definition <query>` | **Definition Lookup**. Best for "Where is X implemented/defined?" |
 | `/search <query>` | **Pure Semantic Search**. Best for "How does X work?" |
 | `/find <query>` | **Hybrid Search**. Combines semantic search + grep. Best for "Find usage of X". |
 | `/call-graph <query>` | **Call Graph Trace**. Find callers/callees to understand execution flow. |
@@ -420,12 +411,18 @@ CI usage split:
 - `npm run eval:smoke`: harness smoke check with local mock embeddings (used in main CI)
 - `npm run eval:ci`: real quality gate against baseline/budget (for scheduled/manual quality workflow)
 
-For `eval-quality.yml`, configure repo secrets:
+For `eval-quality.yml`, the default CI path uses **GitHub Models** with the workflow `GITHUB_TOKEN` plus `models: read`, so you do not need a separate OpenAI API key just to run the scheduled gate.
 
-- `EVAL_EMBED_BASE_URL` (OpenAI-compatible `/v1` endpoint)
+That default GitHub Models path uses `benchmarks/budgets/github-models.json`, which applies stable absolute thresholds instead of the stricter baseline-regression budget used for explicit external providers.
+
+Optional override secrets for another OpenAI-compatible endpoint:
+
+- `EVAL_EMBED_BASE_URL`
 - `EVAL_EMBED_API_KEY`
 - `EVAL_EMBED_MODEL` (optional, default `text-embedding-3-small`)
 - `EVAL_EMBED_DIMENSIONS` (optional, default `1536`)
+
+If you override the provider, set both `EVAL_EMBED_BASE_URL` and `EVAL_EMBED_API_KEY`. Otherwise the workflow falls back to GitHub Models automatically. Override providers continue to use the baseline-driven budget in `benchmarks/budgets/default.json`.
 
 No OpenAI API access? Use Ollama quality gate locally:
 
@@ -472,8 +469,9 @@ Each run writes:
   - `benchmarks/golden/small.json`
   - `benchmarks/golden/medium.json`
   - `benchmarks/golden/large.json`
-- CI budget:
-  - `benchmarks/budgets/default.json`
+- CI budgets:
+  - `benchmarks/budgets/github-models.json` for the default GitHub Models workflow path
+  - `benchmarks/budgets/default.json` for explicit external provider overrides with baseline comparison
 
 Full docs: `docs/evaluation.md`
 

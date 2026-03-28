@@ -1,0 +1,9 @@
+{
+  "name": "github-models-eval-budget",
+  "failOnMissingBaseline": false,
+  "thresholds": {
+    "minHitAt5": 0.5,
+    "minMrrAt10": 0.45,
+    "p95LatencyMaxAbsoluteMs": 500
+  }
+}

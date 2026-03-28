@@ -1,6 +1,6 @@
 {
   "name": "opencode-codebase-index",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Semantic codebase indexing and search for OpenCode - find code by meaning, not just keywords",
   "type": "module",
   "main": "dist/index.js",
@@ -45,7 +45,9 @@
     "eval:ci:ollama": "npx tsx src/cli.ts eval run --config .github/eval-ollama-config.json --reindex --ci --budget benchmarks/budgets/default.json --against benchmarks/baselines/eval-baseline-summary.json",
     "eval:compare": "npx tsx src/cli.ts eval compare",
     "test": "vitest",
+    "pretest:run": "npm run build:native",
     "test:run": "vitest run",
+    "pretest:coverage": "npm run build:native",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",

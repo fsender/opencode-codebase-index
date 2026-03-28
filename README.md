@@ -469,8 +469,9 @@ Each run writes:
   - `benchmarks/golden/small.json`
   - `benchmarks/golden/medium.json`
   - `benchmarks/golden/large.json`
-- CI budget:
-  - `benchmarks/budgets/default.json`
+- CI budgets:
+  - `benchmarks/budgets/github-models.json` for the default GitHub Models workflow path
+  - `benchmarks/budgets/default.json` for explicit external provider overrides with baseline comparison
 
 Full docs: `docs/evaluation.md`
 

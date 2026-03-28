@@ -54,17 +54,35 @@ There are two CI levels:
 2. **Quality gate workflow (`eval-quality.yml`)** runs `npm run eval:ci` with your real provider config/authentication context.
    - Purpose: enforce actual quality/latency regressions against baselines/budgets.
    - Triggered on schedule (`cron`) and manually (`workflow_dispatch`).
+   - By default, it uses GitHub Models embeddings with the workflow `GITHUB_TOKEN` and `models: read` permission.
+   - GitHub Models runs use `benchmarks/budgets/github-models.json`, which enforces stable absolute quality floors (`minHitAt5`, `minMrrAt10`, `p95LatencyMaxAbsoluteMs`) instead of comparing to the provider-specific regression baseline.
+   - If `EVAL_EMBED_BASE_URL` and `EVAL_EMBED_API_KEY` are both set, those explicit provider credentials override the GitHub Models default and the workflow switches back to the stricter baseline-driven budget in `benchmarks/budgets/default.json`.
 
 This split keeps regular CI stable while preserving meaningful retrieval-quality gating.
 
-### Setting up real provider secrets for `eval-quality.yml`
+### Authentication for `eval-quality.yml`
+
+Default path (no extra API key required):
+
+- The workflow uses `GITHUB_TOKEN` with `models: read`
+- Base URL: `https://models.inference.ai.azure.com`
+- Default model: `text-embedding-3-small`
+- Default dimensions: `1536`
+
+This uses GitHub Models from GitHub Actions. It is separate from your local OpenCode/Copilot OAuth session, but it avoids provisioning a separate OpenAI key for the scheduled/manual gate.
+
+Because GitHub Models in Actions has higher latency/ranking variance than a dedicated provider setup, the default GitHub Models path uses an absolute-floor CI budget instead of relative baseline regression checks.
+
+Optional override for another OpenAI-compatible provider:
 
 Configure these GitHub repository secrets:
 
-- `EVAL_EMBED_BASE_URL` (required) — OpenAI-compatible base URL ending in `/v1`
-- `EVAL_EMBED_API_KEY` (required)
+- `EVAL_EMBED_BASE_URL` (required for override) — OpenAI-compatible base URL ending in `/v1` when applicable
+- `EVAL_EMBED_API_KEY` (required for override)
 - `EVAL_EMBED_MODEL` (optional, default `text-embedding-3-small`)
 - `EVAL_EMBED_DIMENSIONS` (optional, default `1536`)
+
+If you set one of `EVAL_EMBED_BASE_URL` or `EVAL_EMBED_API_KEY`, you must set both. Partial override configuration fails fast.
 
 The workflow generates `.github/eval-quality-config.json` from secrets and runs:
 
@@ -74,10 +92,18 @@ npx tsx src/cli.ts eval run --config .github/eval-quality-config.json --reindex 
 
 #### Example values
 
+- GitHub Models in Actions (default):
+  - `baseUrl=https://models.inference.ai.azure.com`
+  - `apiKey=${{ github.token }}`
+  - requires workflow permission `models: read`
+  - uses `benchmarks/budgets/github-models.json`
+
 - OpenAI direct:
   - `EVAL_EMBED_BASE_URL=https://api.openai.com/v1`
+  - `EVAL_EMBED_API_KEY=<your OpenAI-compatible API key>`
   - `EVAL_EMBED_MODEL=text-embedding-3-small`
   - `EVAL_EMBED_DIMENSIONS=1536`
+  - uses `benchmarks/budgets/default.json` plus `benchmarks/baselines/eval-baseline-summary.json`
 
 - Gateway/proxy (LiteLLM, vLLM, OpenRouter-like OpenAI-compatible endpoint):
   - `EVAL_EMBED_BASE_URL=https://your-gateway.example.com/v1`

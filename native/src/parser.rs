@@ -76,7 +76,7 @@ fn extract_chunks(tree: &Tree, source: &str, language: &Language) -> Result<Vec<
     let root = tree.root_node();
     let mut cursor = root.walk();
 
-    extract_semantic_nodes(&mut cursor, source, language, &mut chunks);
+    extract_semantic_nodes(&mut cursor, source, language, &mut chunks, 0);
 
     if chunks.is_empty() {
         return Ok(chunk_by_lines(source, language));
@@ -92,7 +92,16 @@ fn extract_semantic_nodes(
     source: &str,
     language: &Language,
     chunks: &mut Vec<CodeChunk>,
+    depth: usize,
 ) {
+    const MAX_RECURSION_DEPTH: usize = 4096;
+    let skip_children = depth > MAX_RECURSION_DEPTH;
+    if skip_children {
+        eprintln!(
+            "WARNING: Maximum recursion depth {} exceeded in extract_semantic_nodes, skipping further recursion",
+            MAX_RECURSION_DEPTH
+        );
+    }
     loop {
         let node = cursor.node();
         let node_type = node.kind();
@@ -136,8 +145,8 @@ fn extract_semantic_nodes(
             }
         }
 
-        if !is_semantic && cursor.goto_first_child() {
-            extract_semantic_nodes(cursor, source, language, chunks);
+        if !is_semantic && !skip_children && cursor.goto_first_child() {
+            extract_semantic_nodes(cursor, source, language, chunks, depth + 1);
             cursor.goto_parent();
         }
 
@@ -235,24 +244,8 @@ fn is_semantic_node(node_type: &str, language: &Language) -> bool {
         | Language::JavaScriptJsx => {
             matches!(
                 node_type,
-                "program"
-                    | "statement_block"
-                    | "expression_statement"
-                    | "if_statement"
-                    | "for_statement"
-                    | "while_statement"
-                    | "return_statement"
-                    | "variable_declaration"
-                    | "lexical_declaration"
-                    | "break_statement"
-                    | "continue_statement"
-                    | "throw_statement"
-                    | "try_statement"
-                    | "catch_clause"
-                    | "switch_statement"
-                    | "case_clause"
-                    | "default_clause"
-                    | "function_declaration"
+                // Original 10 types
+                "function_declaration"
                     | "function"
                     | "arrow_function"
                     | "method_definition"
@@ -261,14 +254,16 @@ fn is_semantic_node(node_type: &str, language: &Language) -> bool {
                     | "type_alias_declaration"
                     | "enum_declaration"
                     | "export_statement"
-                    | "import_statement"
-                    | "debugger_statement"
-                    | "with_statement"
-                    | "labeled_statement"
-                    | "do_statement"
+                    | "lexical_declaration"
+                    // Added 5 most common statement types
+                    | "expression_statement"
+                    | "if_statement"
+                    | "for_statement"
+                    | "return_statement"
+                    | "try_statement"
+                    | "while_statement"
+                    | "statement_block"
                     | "for_in_statement"
-                    | "for_of_statement"
-                    | "switch_case"
             )
         }
         Language::Python => {

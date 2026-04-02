@@ -5,6 +5,10 @@ edition = "2021"
 license = "MIT"
 description = "Native Rust core for opencode-codebase-index: tree-sitter parsing and vector search"
 
+[features]
+default = []
+testing = []
+
 [lib]
 crate-type = ["cdylib"]
 

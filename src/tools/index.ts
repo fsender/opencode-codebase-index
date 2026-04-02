@@ -312,7 +312,6 @@ export const add_knowledge_base: ToolDefinition = tool({
     "Supports absolute paths or relative paths (relative to the project root).",
   args: {
     path: z.string().describe("Path to the folder to add as a knowledge base (absolute or relative to project root)"),
-    reindex: z.boolean().optional().default(true).describe("Automatically reindex after adding"),
   },
   async execute(args) {
     const inputPath = args.path.trim();
@@ -360,12 +359,7 @@ export const add_knowledge_base: ToolDefinition = tool({
     let result = `Added knowledge base: ${resolvedPath}\n\n`;
     result += `Total knowledge bases: ${knowledgeBases.length}\n`;
     result += `Config saved to: ${getConfigPath()}\n`;
-
-    if (args.reindex) {
-      result += `\nReindexing... (restart OpenCode to pick up the new config, then run /index)`;
-    } else {
-      result += `\nRun /index to rebuild the index with the new knowledge base.`;
-    }
+    result += `\nRun /index to rebuild the index with the new knowledge base.`;
 
     return result;
   },
@@ -414,7 +408,6 @@ export const remove_knowledge_base: ToolDefinition = tool({
     "Remove a knowledge base folder from the semantic search index.",
   args: {
     path: z.string().describe("Path of the knowledge base to remove (must match the configured path exactly)"),
-    reindex: z.boolean().optional().default(false).describe("Automatically reindex after removing"),
   },
   async execute(args) {
     const inputPath = args.path.trim();
@@ -452,12 +445,7 @@ export const remove_knowledge_base: ToolDefinition = tool({
     let result = `Removed knowledge base: ${removed}\n\n`;
     result += `Remaining knowledge bases: ${knowledgeBases.length}\n`;
     result += `Config saved to: ${getConfigPath()}\n`;
-
-    if (args.reindex) {
-      result += `\nReindexing... (restart OpenCode to pick up the new config, then run /index)`;
-    } else {
-      result += `\nRun /index to rebuild the index without the removed knowledge base.`;
-    }
+    result += `\nRun /index to rebuild the index without the removed knowledge base.`;
 
     return result;
   },

@@ -57,7 +57,34 @@ function getNativeBinding() {
   return require(nativePath);
 }
 
-const native = getNativeBinding();
+function createMockNativeBinding() {
+  const error = new Error("Native module not available. Please rebuild with 'npm run build:native'.");
+  
+  return {
+    parseFile: () => { throw error; },
+    parseFiles: () => { throw error; },
+    hashContent: () => { throw error; },
+    hashFile: () => { throw error; },
+    extractCalls: () => { throw error; },
+    VectorStore: class {
+      constructor() { throw error; }
+    },
+    InvertedIndex: class {
+      constructor() { throw error; }
+    },
+    Database: class {
+      constructor() { throw error; }
+    },
+  };
+}
+
+let native: any;
+try {
+  native = getNativeBinding();
+} catch (e) {
+  console.error("[codebase-index] Failed to load native module:", e);
+  native = createMockNativeBinding();
+}
 
 export interface FileInput {
   path: string;

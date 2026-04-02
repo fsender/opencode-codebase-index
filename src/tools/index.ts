@@ -216,7 +216,7 @@ export const find_similar: ToolDefinition = tool({
       return "No similar code found. Try a different snippet or run index_codebase first.";
     }
 
-    return `Found ${results.length} similar code blocks:\n\n${formatSearchResults(results)}`;
+    return formatSearchResults(results);
   },
 });
 
@@ -244,7 +244,7 @@ export const codebase_search: ToolDefinition = tool({
       return "No matching code found. Try a different query or run index_codebase first.";
     }
 
-    return `Found ${results.length} results for "${args.query}":\n\n${formatSearchResults(results, "score")}`;
+    return formatSearchResults(results, "score");
   },
 });
 
@@ -292,7 +292,7 @@ export const call_graph: ToolDefinition = tool({
       const formatted = callees.map((e, i) =>
         `[${i + 1}] \u2192 ${e.targetName} (${e.callType}) at line ${e.line}${e.isResolved ? ` [resolved: ${e.toSymbolId}]` : " [unresolved]"}`
       );
-      return `${args.name} calls ${callees.length} function(s):\n\n${formatted.join("\n")}`;
+      return formatted.join("\n");
     }
     const callers = await indexer.getCallers(args.name);
     if (callers.length === 0) {
@@ -301,7 +301,7 @@ export const call_graph: ToolDefinition = tool({
     const formatted = callers.map((e, i) =>
       `[${i + 1}] \u2190 from ${e.fromSymbolName ?? "<unknown>"} in ${e.fromSymbolFilePath ?? "<unknown file>"} [${e.fromSymbolId}] (${e.callType}) at line ${e.line}${e.isResolved ? " [resolved]" : " [unresolved]"}`
     );
-    return `"${args.name}" is called by ${callers.length} function(s):\n\n${formatted.join("\n")}`;
+    return formatted.join("\n");
   },
 });
 
@@ -356,7 +356,7 @@ export const add_knowledge_base: ToolDefinition = tool({
     config.knowledgeBases = knowledgeBases;
     saveConfig(config);
 
-    let result = `Added knowledge base: ${resolvedPath}\n\n`;
+    let result = `${resolvedPath}\n`;
     result += `Total knowledge bases: ${knowledgeBases.length}\n`;
     result += `Config saved to: ${getConfigPath()}\n`;
     result += `\nRun /index to rebuild the index with the new knowledge base.`;
@@ -442,7 +442,7 @@ export const remove_knowledge_base: ToolDefinition = tool({
     config.knowledgeBases = knowledgeBases;
     saveConfig(config);
 
-    let result = `Removed knowledge base: ${removed}\n\n`;
+    let result = `Removed: ${removed}\n\n`;
     result += `Remaining knowledge bases: ${knowledgeBases.length}\n`;
     result += `Config saved to: ${getConfigPath()}\n`;
     result += `\nRun /index to rebuild the index without the removed knowledge base.`;

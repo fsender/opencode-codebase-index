@@ -75,12 +75,11 @@ export class FileWatcher {
   }
 
   private handleChange(type: FileChangeType, filePath: string): void {
-    const includePatterns = [...this.config.include, ...(this.config.additionalInclude || [])];
     if (
       !shouldIncludeFile(
         filePath,
         this.projectRoot,
-        includePatterns,
+        this.config.include,
         this.config.exclude,
         createIgnoreFilter(this.projectRoot)
       )

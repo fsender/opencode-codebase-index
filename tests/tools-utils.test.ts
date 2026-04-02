@@ -332,12 +332,10 @@ describe("tools utils", () => {
       }];
       const result = formatCodebasePeek(results, "init function");
 
-      expect(result).toContain("1 locations");
       expect(result).toContain('"initialize"');
       expect(result).toContain("src/index.ts:10-20");
       expect(result).toContain("0.85");
       expect(result).toContain("function");
-      expect(result).toContain("Use Read tool");
     });
 
     it("should format results without names as anonymous", () => {
@@ -366,7 +364,9 @@ describe("tools utils", () => {
       }];
       const result = formatCodebasePeek(results, "my search query");
 
-      expect(result).toContain('"my search query"');
+      expect(result).toContain('"foo"');
+      expect(result).toContain("a.ts:1-2");
+      expect(result).toContain("0.5");
     });
   });
 

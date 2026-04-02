@@ -1,8 +1,12 @@
 use crate::types::Language;
 use crate::{CodeChunk, FileInput, ParsedFile};
 use anyhow::{anyhow, Result};
+use lazy_static::lazy_static;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::path::Path;
+#[cfg(debug_assertions)]
+use std::time::Instant;
 use tree_sitter::{Parser, Tree};
 
 const MIN_CHUNK_SIZE: usize = 50;
@@ -94,6 +98,13 @@ fn extract_semantic_nodes(
     chunks: &mut Vec<CodeChunk>,
     depth: usize,
 ) {
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+    #[cfg(debug_assertions)]
+    {
+        PERF_STATS.lock().unwrap().extract_semantic_nodes_calls += 1;
+    }
+
     const MAX_RECURSION_DEPTH: usize = 4096;
     let skip_children = depth > MAX_RECURSION_DEPTH;
     if skip_children {
@@ -123,7 +134,7 @@ fn extract_semantic_nodes(
                 let name = extract_name(cursor, source);
 
                 let start_line = if leading_comment.is_some() {
-                    source[..start_byte].matches('\n').count() as u32 + 1
+                    source[..start_byte].lines().count() as u32
                 } else {
                     node.start_position().row as u32 + 1
                 };
@@ -154,6 +165,12 @@ fn extract_semantic_nodes(
             break;
         }
     }
+
+    #[cfg(debug_assertions)]
+    {
+        let elapsed = start.elapsed().as_micros();
+        PERF_STATS.lock().unwrap().extract_semantic_nodes_time += elapsed;
+    }
 }
 
 fn find_leading_comment(
@@ -161,16 +178,28 @@ fn find_leading_comment(
     source: &str,
     language: &Language,
 ) -> Option<(usize, String)> {
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+    #[cfg(debug_assertions)]
+    {
+        PERF_STATS.lock().unwrap().find_leading_comment_calls += 1;
+    }
+
     let mut prev = node.prev_sibling();
     let mut comments = Vec::new();
+    let mut count = 0;
+    const MAX_COMMENT_SIBLINGS: usize = 5;
 
     while let Some(sibling) = prev {
+        if count >= MAX_COMMENT_SIBLINGS {
+            break;
+        }
         if is_comment_node(sibling.kind(), language) {
             let start = sibling.start_byte();
             let end = sibling.end_byte();
-            let text = source[start..end].to_string();
-            comments.push((start, text));
+            comments.push((start, end));
             prev = sibling.prev_sibling();
+            count += 1;
         } else {
             break;
         }
@@ -184,9 +213,15 @@ fn find_leading_comment(
     let first_start = comments.first().map(|(s, _)| *s)?;
     let combined: String = comments
         .into_iter()
-        .map(|(_, t)| t)
+        .map(|(start, end)| &source[start..end])
         .collect::<Vec<_>>()
         .join("\n");
+
+    #[cfg(debug_assertions)]
+    {
+        let elapsed = start.elapsed().as_micros();
+        PERF_STATS.lock().unwrap().find_leading_comment_time += elapsed;
+    }
 
     Some((first_start, combined))
 }
@@ -196,172 +231,246 @@ fn is_comment_node(node_type: &str, language: &Language) -> bool {
         Language::TypeScript
         | Language::TypeScriptTsx
         | Language::JavaScript
-        | Language::JavaScriptJsx => {
-            matches!(node_type, "comment")
-        }
-        Language::Python => {
-            matches!(node_type, "comment")
-        }
-        Language::Rust => {
-            matches!(node_type, "line_comment" | "block_comment")
-        }
-        Language::Go => {
-            matches!(node_type, "comment")
-        }
-        Language::Java => {
-            matches!(node_type, "line_comment" | "block_comment")
-        }
-        Language::CSharp => {
-            matches!(node_type, "comment")
-        }
-        Language::Ruby => {
-            matches!(node_type, "comment")
-        }
-        Language::Bash => {
-            matches!(node_type, "comment")
-        }
-        Language::C | Language::Cpp => {
-            matches!(node_type, "comment")
-        }
-        Language::Toml => {
-            matches!(node_type, "comment")
-        }
-        Language::Yaml => {
-            matches!(node_type, "comment")
-        }
-        Language::Php => {
-            matches!(node_type, "comment")
-        }
+        | Language::JavaScriptJsx => matches!(node_type, "comment"),
+        Language::Python => matches!(node_type, "comment"),
+        Language::Rust => matches!(node_type, "line_comment" | "block_comment"),
+        Language::Go => matches!(node_type, "comment"),
+        Language::Java => matches!(node_type, "line_comment" | "block_comment"),
+        Language::CSharp => matches!(node_type, "comment"),
+        Language::Ruby => matches!(node_type, "comment"),
+        Language::Bash => matches!(node_type, "comment"),
+        Language::C | Language::Cpp => matches!(node_type, "comment"),
+        Language::Toml => matches!(node_type, "comment"),
+        Language::Yaml => matches!(node_type, "comment"),
+        Language::Php => matches!(node_type, "comment"),
         _ => false,
     }
+}
+
+struct PerfStats {
+    extract_semantic_nodes_calls: usize,
+    extract_semantic_nodes_time: u128,
+    find_leading_comment_calls: usize,
+    find_leading_comment_time: u128,
+    extract_name_calls: usize,
+    extract_name_time: u128,
+    is_semantic_node_calls: usize,
+    is_semantic_node_time: u128,
+}
+
+impl PerfStats {
+    fn new() -> Self {
+        Self {
+            extract_semantic_nodes_calls: 0,
+            extract_semantic_nodes_time: 0,
+            find_leading_comment_calls: 0,
+            find_leading_comment_time: 0,
+            extract_name_calls: 0,
+            extract_name_time: 0,
+            is_semantic_node_calls: 0,
+            is_semantic_node_time: 0,
+        }
+    }
+
+    fn print(&self) {
+        eprintln!("=== Parser Performance Stats ===");
+        eprintln!(
+            "extract_semantic_nodes: {} calls, {} us",
+            self.extract_semantic_nodes_calls, self.extract_semantic_nodes_time
+        );
+        eprintln!(
+            "find_leading_comment: {} calls, {} us",
+            self.find_leading_comment_calls, self.find_leading_comment_time
+        );
+        eprintln!(
+            "extract_name: {} calls, {} us",
+            self.extract_name_calls, self.extract_name_time
+        );
+        eprintln!(
+            "is_semantic_node: {} calls, {} us",
+            self.is_semantic_node_calls, self.is_semantic_node_time
+        );
+    }
+}
+
+pub fn print_parser_perf_stats() {
+    PERF_STATS.lock().unwrap().print();
+}
+
+lazy_static! {
+    static ref PERF_STATS: std::sync::Mutex<PerfStats> = std::sync::Mutex::new(PerfStats::new());
+    static ref TS_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        // Original 10 types
+        set.insert("function_declaration");
+        set.insert("function");
+        set.insert("arrow_function");
+        set.insert("method_definition");
+        set.insert("class_declaration");
+        set.insert("interface_declaration");
+        set.insert("type_alias_declaration");
+        set.insert("enum_declaration");
+        set.insert("export_statement");
+        set.insert("lexical_declaration");
+        // Added 5 most common statement types
+        set.insert("expression_statement");
+        set.insert("if_statement");
+        set.insert("for_statement");
+        set.insert("return_statement");
+        set.insert("try_statement");
+        set.insert("while_statement");
+        set.insert("statement_block");
+        set.insert("for_in_statement");
+        set
+    };
+    static ref PYTHON_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("function_definition");
+        set.insert("class_definition");
+        set.insert("decorated_definition");
+        set
+    };
+    static ref RUST_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("function_item");
+        set.insert("impl_item");
+        set.insert("struct_item");
+        set.insert("enum_item");
+        set.insert("trait_item");
+        set.insert("mod_item");
+        set.insert("macro_definition");
+        set
+    };
+    static ref GO_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("function_declaration");
+        set.insert("method_declaration");
+        set.insert("type_declaration");
+        set.insert("type_spec");
+        set
+    };
+    static ref JAVA_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("class_declaration");
+        set.insert("method_declaration");
+        set.insert("constructor_declaration");
+        set.insert("interface_declaration");
+        set.insert("enum_declaration");
+        set.insert("annotation_type_declaration");
+        set
+    };
+    static ref CSHARP_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("class_declaration");
+        set.insert("method_declaration");
+        set.insert("constructor_declaration");
+        set.insert("interface_declaration");
+        set.insert("enum_declaration");
+        set.insert("struct_declaration");
+        set.insert("record_declaration");
+        set.insert("property_declaration");
+        set
+    };
+    static ref RUBY_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("method");
+        set.insert("singleton_method");
+        set.insert("class");
+        set.insert("module");
+        set
+    };
+    static ref BASH_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("function_definition");
+        set
+    };
+    static ref C_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("function_definition");
+        set.insert("struct_specifier");
+        set.insert("enum_specifier");
+        set.insert("type_definition");
+        set
+    };
+    static ref CPP_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("function_definition");
+        set.insert("class_specifier");
+        set.insert("struct_specifier");
+        set.insert("enum_specifier");
+        set.insert("namespace_definition");
+        set.insert("template_declaration");
+        set
+    };
+    static ref TOML_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("table");
+        set.insert("table_array_element");
+        set
+    };
+    static ref YAML_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("block_mapping_pair");
+        set.insert("block_sequence");
+        set
+    };
+    static ref PHP_SEMANTIC_NODES: HashSet<&'static str> = {
+        let mut set = HashSet::new();
+        set.insert("function_definition");
+        set.insert("method_declaration");
+        set.insert("class_declaration");
+        set.insert("interface_declaration");
+        set.insert("trait_declaration");
+        set.insert("enum_declaration");
+        set
+    };
 }
 
 fn is_semantic_node(node_type: &str, language: &Language) -> bool {
-    match language {
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+    #[cfg(debug_assertions)]
+    {
+        PERF_STATS.lock().unwrap().is_semantic_node_calls += 1;
+    }
+
+    let result = match language {
         Language::TypeScript
         | Language::TypeScriptTsx
         | Language::JavaScript
-        | Language::JavaScriptJsx => {
-            matches!(
-                node_type,
-                // Original 10 types
-                "function_declaration"
-                    | "function"
-                    | "arrow_function"
-                    | "method_definition"
-                    | "class_declaration"
-                    | "interface_declaration"
-                    | "type_alias_declaration"
-                    | "enum_declaration"
-                    | "export_statement"
-                    | "lexical_declaration"
-                    // Added 5 most common statement types
-                    | "expression_statement"
-                    | "if_statement"
-                    | "for_statement"
-                    | "return_statement"
-                    | "try_statement"
-                    | "while_statement"
-                    | "statement_block"
-                    | "for_in_statement"
-            )
-        }
-        Language::Python => {
-            matches!(
-                node_type,
-                "function_definition" | "class_definition" | "decorated_definition"
-            )
-        }
-        Language::Rust => {
-            matches!(
-                node_type,
-                "function_item"
-                    | "impl_item"
-                    | "struct_item"
-                    | "enum_item"
-                    | "trait_item"
-                    | "mod_item"
-                    | "macro_definition"
-            )
-        }
-        Language::Go => {
-            matches!(
-                node_type,
-                "function_declaration" | "method_declaration" | "type_declaration" | "type_spec"
-            )
-        }
-        Language::Java => {
-            matches!(
-                node_type,
-                "class_declaration"
-                    | "method_declaration"
-                    | "constructor_declaration"
-                    | "interface_declaration"
-                    | "enum_declaration"
-                    | "annotation_type_declaration"
-            )
-        }
-        Language::CSharp => {
-            matches!(
-                node_type,
-                "class_declaration"
-                    | "method_declaration"
-                    | "constructor_declaration"
-                    | "interface_declaration"
-                    | "enum_declaration"
-                    | "struct_declaration"
-                    | "record_declaration"
-                    | "property_declaration"
-            )
-        }
-        Language::Ruby => {
-            matches!(
-                node_type,
-                "method" | "singleton_method" | "class" | "module"
-            )
-        }
-        Language::Bash => {
-            matches!(node_type, "function_definition")
-        }
-        Language::C => {
-            matches!(
-                node_type,
-                "function_definition" | "struct_specifier" | "enum_specifier" | "type_definition"
-            )
-        }
-        Language::Cpp => {
-            matches!(
-                node_type,
-                "function_definition"
-                    | "class_specifier"
-                    | "struct_specifier"
-                    | "enum_specifier"
-                    | "namespace_definition"
-                    | "template_declaration"
-            )
-        }
-        Language::Toml => {
-            matches!(node_type, "table" | "table_array_element")
-        }
-        Language::Yaml => {
-            matches!(node_type, "block_mapping_pair" | "block_sequence")
-        }
-        Language::Php => {
-            matches!(
-                node_type,
-                "function_definition"
-                    | "method_declaration"
-                    | "class_declaration"
-                    | "interface_declaration"
-                    | "trait_declaration"
-                    | "enum_declaration"
-            )
-        }
+        | Language::JavaScriptJsx => TS_SEMANTIC_NODES.contains(node_type),
+        Language::Python => PYTHON_SEMANTIC_NODES.contains(node_type),
+        Language::Rust => RUST_SEMANTIC_NODES.contains(node_type),
+        Language::Go => GO_SEMANTIC_NODES.contains(node_type),
+        Language::Java => JAVA_SEMANTIC_NODES.contains(node_type),
+        Language::CSharp => CSHARP_SEMANTIC_NODES.contains(node_type),
+        Language::Ruby => RUBY_SEMANTIC_NODES.contains(node_type),
+        Language::Bash => BASH_SEMANTIC_NODES.contains(node_type),
+        Language::C => C_SEMANTIC_NODES.contains(node_type),
+        Language::Cpp => CPP_SEMANTIC_NODES.contains(node_type),
+        Language::Toml => TOML_SEMANTIC_NODES.contains(node_type),
+        Language::Yaml => YAML_SEMANTIC_NODES.contains(node_type),
+        Language::Php => PHP_SEMANTIC_NODES.contains(node_type),
         _ => false,
+    };
+
+    #[cfg(debug_assertions)]
+    {
+        let elapsed = start.elapsed().as_micros();
+        PERF_STATS.lock().unwrap().is_semantic_node_time += elapsed;
     }
+
+    result
 }
 
 fn extract_name(cursor: &tree_sitter::TreeCursor, source: &str) -> Option<String> {
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+    #[cfg(debug_assertions)]
+    {
+        PERF_STATS.lock().unwrap().extract_name_calls += 1;
+    }
+
     let node = cursor.node();
 
     let extract_identifier = |n: tree_sitter::Node| -> Option<String> {
@@ -379,6 +488,11 @@ fn extract_name(cursor: &tree_sitter::TreeCursor, source: &str) -> Option<String
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i) {
             if let Some(name) = extract_identifier(child) {
+                #[cfg(debug_assertions)]
+                {
+                    let elapsed = start.elapsed().as_micros();
+                    PERF_STATS.lock().unwrap().extract_name_time += elapsed;
+                }
                 return Some(name);
             }
         }
@@ -401,6 +515,11 @@ fn extract_name(cursor: &tree_sitter::TreeCursor, source: &str) -> Option<String
                     for j in 0..child.child_count() {
                         if let Some(grandchild) = child.child(j) {
                             if let Some(name) = extract_identifier(grandchild) {
+                                #[cfg(debug_assertions)]
+                                {
+                                    let elapsed = start.elapsed().as_micros();
+                                    PERF_STATS.lock().unwrap().extract_name_time += elapsed;
+                                }
                                 return Some(name);
                             }
                         }
@@ -413,6 +532,12 @@ fn extract_name(cursor: &tree_sitter::TreeCursor, source: &str) -> Option<String
                                     for k in 0..declarator.child_count() {
                                         if let Some(name_node) = declarator.child(k) {
                                             if name_node.kind() == "identifier" {
+                                                #[cfg(debug_assertions)]
+                                                {
+                                                    let elapsed = start.elapsed().as_micros();
+                                                    PERF_STATS.lock().unwrap().extract_name_time +=
+                                                        elapsed;
+                                                }
                                                 return Some(
                                                     source[name_node.start_byte()
                                                         ..name_node.end_byte()]
@@ -428,6 +553,12 @@ fn extract_name(cursor: &tree_sitter::TreeCursor, source: &str) -> Option<String
                 }
             }
         }
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let elapsed = start.elapsed().as_micros();
+        PERF_STATS.lock().unwrap().extract_name_time += elapsed;
     }
 
     None

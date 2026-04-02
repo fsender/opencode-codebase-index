@@ -53,6 +53,10 @@ export function createIgnoreFilter(projectRoot: string): Ignore {
     "target",
     "vendor",
     ".opencode",
+    ".*",
+    "**/.*",
+    "**/.*/**",
+    "**/*build*/**",
   ];
 
   ig.add(defaultIgnores);
@@ -74,6 +78,18 @@ export function shouldIncludeFile(
   ignoreFilter: Ignore
 ): boolean {
   const relativePath = path.relative(projectRoot, filePath);
+
+  // Exclude hidden files/folders (starting with .)
+  const pathParts = relativePath.split(path.sep);
+  for (const part of pathParts) {
+    if (part.startsWith(".") && part !== "." && part !== "..") {
+      return false;
+    }
+    // Exclude folders containing "build" in their name
+    if (part.toLowerCase().includes("build") && part !== "rebuild") {
+      return false;
+    }
+  }
 
   if (ignoreFilter.ignores(relativePath)) {
     return false;
@@ -126,6 +142,20 @@ export async function* walkDirectory(
     const fullPath = path.join(dir, entry.name);
     const relativePath = path.relative(projectRoot, fullPath);
 
+    // Skip hidden files/folders (starting with .)
+    if (entry.name.startsWith(".") && entry.name !== "." && entry.name !== "..") {
+      if (entry.isDirectory()) {
+        skipped.push({ path: relativePath, reason: "excluded" });
+      }
+      continue;
+    }
+
+    // Skip folders containing "build" in their name
+    if (entry.isDirectory() && entry.name.toLowerCase().includes("build")) {
+      skipped.push({ path: relativePath, reason: "excluded" });
+      continue;
+    }
+
     if (ignoreFilter.ignores(relativePath)) {
       if (entry.isFile()) {
         skipped.push({ path: relativePath, reason: "gitignore" });
@@ -177,12 +207,14 @@ export async function collectFiles(
   projectRoot: string,
   includePatterns: string[],
   excludePatterns: string[],
-  maxFileSize: number
+  maxFileSize: number,
+  additionalRoots?: string[]
 ): Promise<CollectFilesResult> {
   const ignoreFilter = createIgnoreFilter(projectRoot);
   const files: Array<{ path: string; size: number }> = [];
   const skipped: SkippedFile[] = [];
 
+  // Collect from project root
   for await (const file of walkDirectory(
     projectRoot,
     projectRoot,
@@ -193,6 +225,42 @@ export async function collectFiles(
     skipped
   )) {
     files.push(file);
+  }
+
+  // Collect from additional knowledge base directories
+  if (additionalRoots && additionalRoots.length > 0) {
+    // Normalize and deduplicate knowledge base paths
+    const normalizedRoots = new Set<string>();
+    for (const kbRoot of additionalRoots) {
+      const resolved = path.normalize(
+        path.isAbsolute(kbRoot) ? kbRoot : path.resolve(projectRoot, kbRoot)
+      );
+      normalizedRoots.add(resolved);
+    }
+
+    for (const resolvedKbRoot of normalizedRoots) {
+      try {
+        const stat = await fsPromises.stat(resolvedKbRoot);
+        if (!stat.isDirectory()) {
+          skipped.push({ path: resolvedKbRoot, reason: "excluded" });
+          continue;
+        }
+        const kbIgnoreFilter = createIgnoreFilter(resolvedKbRoot);
+        for await (const file of walkDirectory(
+          resolvedKbRoot,
+          resolvedKbRoot,
+          includePatterns,
+          excludePatterns,
+          kbIgnoreFilter,
+          maxFileSize,
+          skipped
+        )) {
+          files.push(file);
+        }
+      } catch {
+        skipped.push({ path: resolvedKbRoot, reason: "excluded" });
+      }
+    }
   }
 
   return { files, skipped };

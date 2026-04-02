@@ -70,6 +70,21 @@ export interface CustomProviderConfig {
   max_batch_size?: number;
 }
 
+export interface RerankerConfig {
+  /** Whether to enable reranking. Default: false */
+  enabled: boolean;
+  /** Base URL of the rerank API endpoint (e.g. "https://api.siliconflow.cn/v1") */
+  baseUrl: string;
+  /** Model name for reranking (e.g. "BAAI/bge-reranker-v2-m3") */
+  model: string;
+  /** API key for the rerank service */
+  apiKey?: string;
+  /** Number of top documents to rerank. Default: 20 */
+  topN?: number;
+  /** Request timeout in milliseconds. Default: 30000 */
+  timeoutMs?: number;
+}
+
 export interface CodebaseIndexConfig {
   embeddingProvider: EmbeddingProvider | 'custom' | 'auto';
   embeddingModel?: EmbeddingModelName;
@@ -79,14 +94,25 @@ export interface CodebaseIndexConfig {
   indexing?: Partial<IndexingConfig>;
   search?: Partial<SearchConfig>;
   debug?: Partial<DebugConfig>;
+  /** Reranking configuration for improving search result quality */
+  reranker?: Partial<RerankerConfig>;
+  /** External directories to index as knowledge bases (absolute or relative paths) */
+  knowledgeBases?: string[];
+  /** Override the default include patterns (replaces defaults) */
   include: string[];
+  /** Override the default exclude patterns (replaces defaults) */
   exclude: string[];
+  /** Additional file patterns to include (extends defaults) */
+  additionalInclude?: string[];
 }
 
 export type ParsedCodebaseIndexConfig = CodebaseIndexConfig & {
   indexing: IndexingConfig;
   search: SearchConfig;
   debug: DebugConfig;
+  reranker: RerankerConfig;
+  knowledgeBases: string[];
+  additionalInclude: string[];
 };
 
 function getDefaultIndexingConfig(): IndexingConfig {
@@ -132,6 +158,16 @@ function getDefaultDebugConfig(): DebugConfig {
     logGc: true,
     logBranch: true,
     metrics: true,
+  };
+}
+
+function getDefaultRerankerConfig(): RerankerConfig {
+  return {
+    enabled: false,
+    baseUrl: "https://api.siliconflow.cn/v1",
+    model: "BAAI/bge-reranker-v2-m3",
+    topN: 20,
+    timeoutMs: 30000,
   };
 }
 
@@ -227,6 +263,27 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
     metrics: typeof rawDebug.metrics === "boolean" ? rawDebug.metrics : defaultDebug.metrics,
   };
 
+  const defaultReranker = getDefaultRerankerConfig();
+  const rawReranker = (input.reranker && typeof input.reranker === "object" ? input.reranker : {}) as Record<string, unknown>;
+  const reranker: RerankerConfig = {
+    enabled: typeof rawReranker.enabled === "boolean" ? rawReranker.enabled : defaultReranker.enabled,
+    baseUrl: typeof rawReranker.baseUrl === "string" ? rawReranker.baseUrl.trim().replace(/\/+$/, '') : defaultReranker.baseUrl,
+    model: typeof rawReranker.model === "string" ? rawReranker.model : defaultReranker.model,
+    apiKey: getResolvedString(rawReranker.apiKey, "$root.reranker.apiKey"),
+    topN: typeof rawReranker.topN === "number" ? Math.max(1, Math.min(200, Math.floor(rawReranker.topN))) : defaultReranker.topN,
+    timeoutMs: typeof rawReranker.timeoutMs === "number" ? Math.max(1000, rawReranker.timeoutMs) : defaultReranker.timeoutMs,
+  };
+
+  const rawKnowledgeBases = input.knowledgeBases;
+  const knowledgeBases: string[] = isStringArray(rawKnowledgeBases)
+    ? rawKnowledgeBases.filter(p => typeof p === "string" && p.trim().length > 0).map(p => p.trim())
+    : [];
+
+  const rawAdditionalInclude = input.additionalInclude;
+  const additionalInclude: string[] = isStringArray(rawAdditionalInclude)
+    ? rawAdditionalInclude.filter(p => typeof p === "string" && p.trim().length > 0).map(p => p.trim())
+    : [];
+
   let embeddingProvider: EmbeddingProvider | 'custom' | 'auto';
   let embeddingModel: EmbeddingModelName | undefined = undefined;
   let customProvider: CustomProviderConfig | undefined = undefined;
@@ -290,9 +347,12 @@ export function parseConfig(raw: unknown): ParsedCodebaseIndexConfig {
     scope: isValidScope(scopeValue) ? scopeValue : "project",
     include: includeValue ?? DEFAULT_INCLUDE,
     exclude: excludeValue ?? DEFAULT_EXCLUDE,
+    additionalInclude,
     indexing,
     search,
     debug,
+    reranker,
+    knowledgeBases,
   };
 }
 

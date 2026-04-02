@@ -16,12 +16,16 @@ import {
   formatLogs,
   formatSearchResults,
 } from "./utils.js";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
+import * as path from "path";
 
 const z = tool.schema;
 
 let sharedIndexer: Indexer | null = null;
+let sharedProjectRoot: string = "";
 
 export function initializeTools(projectRoot: string, config: ParsedCodebaseIndexConfig): void {
+  sharedProjectRoot = projectRoot;
   sharedIndexer = new Indexer(projectRoot, config);
 }
 
@@ -30,6 +34,30 @@ function getIndexer(): Indexer {
     throw new Error("Codebase index tools not initialized. Plugin may not be loaded correctly.");
   }
   return sharedIndexer;
+}
+
+function getConfigPath(): string {
+  return path.join(sharedProjectRoot, ".opencode", "codebase-index.json");
+}
+
+function loadConfig(): Record<string, unknown> {
+  const configPath = getConfigPath();
+  try {
+    if (existsSync(configPath)) {
+      const content = readFileSync(configPath, "utf-8");
+      return JSON.parse(content);
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveConfig(config: Record<string, unknown>): void {
+  const configDir = path.join(sharedProjectRoot, ".opencode");
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true });
+  }
+  const configPath = getConfigPath();
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
 export const codebase_peek: ToolDefinition = tool({
@@ -274,5 +302,163 @@ export const call_graph: ToolDefinition = tool({
       `[${i + 1}] \u2190 from ${e.fromSymbolName ?? "<unknown>"} in ${e.fromSymbolFilePath ?? "<unknown file>"} [${e.fromSymbolId}] (${e.callType}) at line ${e.line}${e.isResolved ? " [resolved]" : " [unresolved]"}`
     );
     return `"${args.name}" is called by ${callers.length} function(s):\n\n${formatted.join("\n")}`;
+  },
+});
+
+export const add_knowledge_base: ToolDefinition = tool({
+  description:
+    "Add a folder as a knowledge base to the semantic search index. " +
+    "The folder will be indexed alongside the main project code. " +
+    "Supports absolute paths or relative paths (relative to the project root).",
+  args: {
+    path: z.string().describe("Path to the folder to add as a knowledge base (absolute or relative to project root)"),
+    reindex: z.boolean().optional().default(true).describe("Automatically reindex after adding"),
+  },
+  async execute(args) {
+    const inputPath = args.path.trim();
+
+    // Resolve the path
+    const resolvedPath = path.isAbsolute(inputPath)
+      ? inputPath
+      : path.resolve(sharedProjectRoot, inputPath);
+
+    // Validate the directory exists
+    if (!existsSync(resolvedPath)) {
+      return `Error: Directory does not exist: ${resolvedPath}`;
+    }
+
+    try {
+      const stat = statSync(resolvedPath);
+      if (!stat.isDirectory()) {
+        return `Error: Path is not a directory: ${resolvedPath}`;
+      }
+    } catch (error) {
+      return `Error: Cannot access directory: ${resolvedPath} - ${error instanceof Error ? error.message : String(error)}`;
+    }
+
+    // Load current config
+    const config = loadConfig();
+    const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
+      ? config.knowledgeBases as string[]
+      : [];
+
+    // Check if already added (normalize paths for comparison)
+    const normalizedPath = path.normalize(resolvedPath);
+    const alreadyExists = knowledgeBases.some(
+      kb => path.normalize(path.isAbsolute(kb) ? kb : path.resolve(sharedProjectRoot, kb)) === normalizedPath
+    );
+
+    if (alreadyExists) {
+      return `Knowledge base already configured: ${resolvedPath}`;
+    }
+
+    // Add the knowledge base
+    knowledgeBases.push(resolvedPath);
+    config.knowledgeBases = knowledgeBases;
+    saveConfig(config);
+
+    let result = `Added knowledge base: ${resolvedPath}\n\n`;
+    result += `Total knowledge bases: ${knowledgeBases.length}\n`;
+    result += `Config saved to: ${getConfigPath()}\n`;
+
+    if (args.reindex) {
+      result += `\nReindexing... (restart OpenCode to pick up the new config, then run /index)`;
+    } else {
+      result += `\nRun /index to rebuild the index with the new knowledge base.`;
+    }
+
+    return result;
+  },
+});
+
+export const list_knowledge_bases: ToolDefinition = tool({
+  description:
+    "List all configured knowledge base folders that are indexed alongside the main project.",
+  args: {},
+  async execute() {
+    const config = loadConfig();
+    const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
+      ? config.knowledgeBases as string[]
+      : [];
+
+    if (knowledgeBases.length === 0) {
+      return "No knowledge bases configured. Use add_knowledge_base to add folders.";
+    }
+
+    let result = `Knowledge Bases (${knowledgeBases.length}):\n\n`;
+
+    for (let i = 0; i < knowledgeBases.length; i++) {
+      const kb = knowledgeBases[i];
+      const resolvedPath = path.isAbsolute(kb) ? kb : path.resolve(sharedProjectRoot, kb);
+      const exists = existsSync(resolvedPath);
+
+      result += `[${i + 1}] ${kb}\n`;
+      result += `    Resolved: ${resolvedPath}\n`;
+      result += `    Status: ${exists ? "Exists" : "NOT FOUND"}\n`;
+      if (exists) {
+        try {
+          const stat = statSync(resolvedPath);
+          result += `    Type: ${stat.isDirectory() ? "Directory" : "File"}\n`;
+        } catch { /* ignore */ }
+      }
+      result += "\n";
+    }
+
+    result += `Config file: ${getConfigPath()}`;
+    return result;
+  },
+});
+
+export const remove_knowledge_base: ToolDefinition = tool({
+  description:
+    "Remove a knowledge base folder from the semantic search index.",
+  args: {
+    path: z.string().describe("Path of the knowledge base to remove (must match the configured path exactly)"),
+    reindex: z.boolean().optional().default(false).describe("Automatically reindex after removing"),
+  },
+  async execute(args) {
+    const inputPath = args.path.trim();
+
+    // Load current config
+    const config = loadConfig();
+    const knowledgeBases: string[] = Array.isArray(config.knowledgeBases)
+      ? config.knowledgeBases as string[]
+      : [];
+
+    if (knowledgeBases.length === 0) {
+      return "No knowledge bases configured.";
+    }
+
+    // Find and remove the knowledge base
+    const normalizedInput = path.normalize(inputPath);
+    const index = knowledgeBases.findIndex(
+      kb => path.normalize(kb) === normalizedInput ||
+           path.normalize(path.isAbsolute(kb) ? kb : path.resolve(sharedProjectRoot, kb)) === normalizedInput
+    );
+
+    if (index === -1) {
+      let result = `Knowledge base not found: ${inputPath}\n\n`;
+      result += `Currently configured:\n`;
+      for (const kb of knowledgeBases) {
+        result += `  - ${kb}\n`;
+      }
+      return result;
+    }
+
+    const removed = knowledgeBases.splice(index, 1)[0];
+    config.knowledgeBases = knowledgeBases;
+    saveConfig(config);
+
+    let result = `Removed knowledge base: ${removed}\n\n`;
+    result += `Remaining knowledge bases: ${knowledgeBases.length}\n`;
+    result += `Config saved to: ${getConfigPath()}\n`;
+
+    if (args.reindex) {
+      result += `\nReindexing... (restart OpenCode to pick up the new config, then run /index)`;
+    } else {
+      result += `\nRun /index to rebuild the index without the removed knowledge base.`;
+    }
+
+    return result;
   },
 });

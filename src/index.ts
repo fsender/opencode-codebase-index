@@ -18,6 +18,9 @@ import {
   find_similar,
   call_graph,
   implementation_lookup,
+  add_knowledge_base,
+  list_knowledge_bases,
+  remove_knowledge_base,
   initializeTools,
 } from "./tools/index.js";
 import { loadCommandsFromDirectory } from "./commands/loader.js";
@@ -43,19 +46,74 @@ function loadJsonFile(filePath: string): unknown {
   return null;
 }
 
+/**
+ * Loads and merges global and project configs.
+ * 
+ * Merge rules:
+ * - Global config is the base, project config overrides
+ * - For embeddingProvider/customProvider: project overrides global, fallback to global if not set in project
+ * - For knowledgeBases: merge arrays (union, deduplicated)
+ * - For other fields: project overrides global
+ */
 function loadPluginConfig(projectRoot: string): unknown {
-  const projectConfig = loadJsonFile(path.join(projectRoot, ".opencode", "codebase-index.json"));
-  if (projectConfig) {
-    return projectConfig;
+  const globalConfigPath = path.join(os.homedir(), ".config", "opencode", "codebase-index.json");
+  const globalConfig = loadJsonFile(globalConfigPath) as Record<string, unknown> | null;
+  const projectConfig = loadJsonFile(path.join(projectRoot, ".opencode", "codebase-index.json")) as Record<string, unknown> | null;
+
+  // If neither exists, return empty
+  if (!globalConfig && !projectConfig) {
+    return {};
   }
 
-  const globalConfigPath = path.join(os.homedir(), ".config", "opencode", "codebase-index.json");
-  const globalConfig = loadJsonFile(globalConfigPath);
-  if (globalConfig) {
+  // If only global exists, return it
+  if (!projectConfig && globalConfig) {
     return globalConfig;
   }
 
-  return {};
+  // If only project exists, return it
+  if (!globalConfig && projectConfig) {
+    return projectConfig;
+  }
+
+  // Both exist - merge them
+  const merged: Record<string, unknown> = { ...globalConfig };
+
+  // For embedding provider: project overrides global if set, otherwise use global
+  if (projectConfig) {
+    if (projectConfig.embeddingProvider) {
+      merged.embeddingProvider = projectConfig.embeddingProvider;
+    }
+    if (projectConfig.customProvider) {
+      merged.customProvider = projectConfig.customProvider;
+    }
+    if (projectConfig.embeddingModel) {
+      merged.embeddingModel = projectConfig.embeddingModel;
+    }
+
+    // For other config sections: project overrides global
+    for (const key of Object.keys(projectConfig)) {
+      if (key === "embeddingProvider" || key === "customProvider" || key === "embeddingModel" || key === "knowledgeBases" || key === "additionalInclude") {
+        continue; // Already handled above or below
+      }
+      merged[key] = projectConfig[key];
+    }
+
+    // For knowledgeBases: merge arrays (union, deduplicated)
+    const globalKbs = globalConfig && Array.isArray(globalConfig.knowledgeBases) ? globalConfig.knowledgeBases : [];
+    const projectKbs = Array.isArray(projectConfig.knowledgeBases) ? projectConfig.knowledgeBases : [];
+    const allKbs = [...globalKbs, ...projectKbs];
+    const uniqueKbs = [...new Set(allKbs.map(p => String(p).trim()))];
+    merged.knowledgeBases = uniqueKbs;
+
+    // For additionalInclude: merge arrays (union, deduplicated)
+    const globalAdditional = globalConfig && Array.isArray(globalConfig.additionalInclude) ? globalConfig.additionalInclude : [];
+    const projectAdditional = Array.isArray(projectConfig.additionalInclude) ? projectConfig.additionalInclude : [];
+    const allAdditional = [...globalAdditional, ...projectAdditional];
+    const uniqueAdditional = [...new Set(allAdditional.map(p => String(p).trim()))];
+    merged.additionalInclude = uniqueAdditional;
+  }
+
+  return merged;
 }
 
 const plugin: Plugin = async ({ directory }) => {
@@ -98,6 +156,9 @@ const plugin: Plugin = async ({ directory }) => {
       find_similar,
       call_graph,
       implementation_lookup,
+      add_knowledge_base,
+      list_knowledge_bases,
+      remove_knowledge_base,
     },
 
     async config(cfg) {

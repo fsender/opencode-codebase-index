@@ -86,7 +86,7 @@ export function shouldIncludeFile(
       return false;
     }
     // Exclude folders containing "build" in their name
-    if (part.toLowerCase().includes("build") && part !== "rebuild") {
+    if (part.toLowerCase().includes("build")) {
       return false;
     }
   }

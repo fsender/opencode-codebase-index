@@ -235,7 +235,24 @@ fn is_semantic_node(node_type: &str, language: &Language) -> bool {
         | Language::JavaScriptJsx => {
             matches!(
                 node_type,
-                "function_declaration"
+                "program"
+                    | "statement_block"
+                    | "expression_statement"
+                    | "if_statement"
+                    | "for_statement"
+                    | "while_statement"
+                    | "return_statement"
+                    | "variable_declaration"
+                    | "lexical_declaration"
+                    | "break_statement"
+                    | "continue_statement"
+                    | "throw_statement"
+                    | "try_statement"
+                    | "catch_clause"
+                    | "switch_statement"
+                    | "case_clause"
+                    | "default_clause"
+                    | "function_declaration"
                     | "function"
                     | "arrow_function"
                     | "method_definition"
@@ -244,7 +261,14 @@ fn is_semantic_node(node_type: &str, language: &Language) -> bool {
                     | "type_alias_declaration"
                     | "enum_declaration"
                     | "export_statement"
-                    | "lexical_declaration"
+                    | "import_statement"
+                    | "debugger_statement"
+                    | "with_statement"
+                    | "labeled_statement"
+                    | "do_statement"
+                    | "for_in_statement"
+                    | "for_of_statement"
+                    | "switch_case"
             )
         }
         Language::Python => {

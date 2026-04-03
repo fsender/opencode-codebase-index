@@ -79,7 +79,7 @@ export const codebase_peek: ToolDefinition = tool({
       metadataOnly: true,
     });
 
-    return formatCodebasePeek(results, args.query);
+    return formatCodebasePeek(results);
   },
 });
 

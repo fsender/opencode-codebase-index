@@ -135,7 +135,7 @@ export function calculatePercentage(progress: IndexProgress): number {
   return 0;
 }
 
-export function formatCodebasePeek(results: SearchResult[], query: string): string {
+export function formatCodebasePeek(results: SearchResult[]): string {
   if (results.length === 0) {
     return "No matching code found. Try a different query or run index_codebase first.";
   }

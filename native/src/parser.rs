@@ -105,7 +105,7 @@ fn extract_semantic_nodes(
         PERF_STATS.lock().unwrap().extract_semantic_nodes_calls += 1;
     }
 
-    const MAX_RECURSION_DEPTH: usize = 4096;
+    const MAX_RECURSION_DEPTH: usize = 1024;
     let skip_children = depth > MAX_RECURSION_DEPTH;
     if skip_children {
         eprintln!(

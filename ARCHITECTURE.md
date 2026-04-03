@@ -353,7 +353,7 @@ No credentials are stored by the plugin.
    - `ts_language()` match arm
    - `is_comment_node()` patterns
    - `is_semantic_node()` patterns
-   - Note: Recursion depth is limited to 4096 levels to prevent stack overflow
+   - Note: Recursion depth is limited to 1024 levels to prevent stack overflow
 4. Add tests in `native/src/parser.rs`
 
 ### Adding a New Embedding Provider

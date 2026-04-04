@@ -103,15 +103,17 @@ fn extract_semantic_nodes(
     #[cfg(debug_assertions)]
     {
         PERF_STATS.lock().unwrap().extract_semantic_nodes_calls += 1;
+        PERF_STATS.lock().unwrap().max_depth_reached =
+            PERF_STATS.lock().unwrap().max_depth_reached.max(depth);
     }
 
     const MAX_RECURSION_DEPTH: usize = 1024;
     let skip_children = depth > MAX_RECURSION_DEPTH;
     if skip_children {
-        eprintln!(
-            "WARNING: Maximum recursion depth {} exceeded in extract_semantic_nodes, skipping further recursion",
-            MAX_RECURSION_DEPTH
-        );
+        #[cfg(debug_assertions)]
+        {
+            PERF_STATS.lock().unwrap().recursion_depth_exceeded_count += 1;
+        }
     }
     loop {
         let node = cursor.node();
@@ -256,6 +258,8 @@ struct PerfStats {
     extract_name_time: u128,
     is_semantic_node_calls: usize,
     is_semantic_node_time: u128,
+    recursion_depth_exceeded_count: usize,
+    max_depth_reached: usize,
 }
 
 impl PerfStats {
@@ -269,6 +273,8 @@ impl PerfStats {
             extract_name_time: 0,
             is_semantic_node_calls: 0,
             is_semantic_node_time: 0,
+            recursion_depth_exceeded_count: 0,
+            max_depth_reached: 0,
         }
     }
 
@@ -290,6 +296,11 @@ impl PerfStats {
             "is_semantic_node: {} calls, {} us",
             self.is_semantic_node_calls, self.is_semantic_node_time
         );
+        eprintln!(
+            "recursion_depth_exceeded: {} times",
+            self.recursion_depth_exceeded_count
+        );
+        eprintln!("max_depth_reached: {}", self.max_depth_reached);
     }
 }
 

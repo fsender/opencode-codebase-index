@@ -16,8 +16,9 @@ import {
   formatLogs,
   formatSearchResults,
 } from "./utils.js";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
+import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import * as path from "path";
+import { loadMergedConfig } from "../config/merger.js";
 
 const z = tool.schema;
 
@@ -41,14 +42,30 @@ function getConfigPath(): string {
 }
 
 function loadConfig(): Record<string, unknown> {
-  const configPath = getConfigPath();
-  try {
-    if (existsSync(configPath)) {
-      const content = readFileSync(configPath, "utf-8");
-      return JSON.parse(content);
+  const rawConfig = loadMergedConfig(sharedProjectRoot);
+  const config: Record<string, unknown> = {};
+  
+  if (rawConfig && typeof rawConfig === "object") {
+    for (const key of Object.keys(rawConfig)) {
+      config[key] = rawConfig[key as keyof typeof rawConfig];
     }
-  } catch { /* ignore */ }
-  return {};
+  }
+  
+  if (Array.isArray(config.knowledgeBases)) {
+    config.knowledgeBases = (config.knowledgeBases as string[]).map(kb => {
+      const resolved = path.isAbsolute(kb) ? kb : path.resolve(sharedProjectRoot, kb);
+      return path.normalize(resolved);
+    });
+  }
+  
+  if (Array.isArray(config.additionalInclude)) {
+    config.additionalInclude = (config.additionalInclude as string[]).map(pattern => {
+      const resolved = path.isAbsolute(pattern) ? pattern : path.resolve(sharedProjectRoot, pattern);
+      return path.normalize(resolved);
+    });
+  }
+  
+  return config;
 }
 
 function saveConfig(config: Record<string, unknown>): void {

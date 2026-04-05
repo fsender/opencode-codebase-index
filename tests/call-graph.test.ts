@@ -19,34 +19,34 @@ describe("call-graph", () => {
   });
 
  describe("call extraction", () => {
-      it("should extract method calls", () => {
-        const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
-        const calls = extractCalls(content, "php");
+     it("should extract method calls", () => {
+          const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
+          const calls = extractCalls(content, "php");
 
-        const methodCalls = calls.filter((c) => c.callType === "Call");
-        const methodNames = methodCalls.map((c) => c.calleeName);
-        expect(methodNames).toContain("validate");
-        expect(methodNames).toContain("add");
-        expect(methodNames).toContain("subtract");
-      });
+          const methodCalls = calls.filter((c) => c.callType === "MethodCall");
+          const methodNames = methodCalls.map((c) => c.calleeName);
+          expect(methodNames).toContain("validate");
+          expect(methodNames).toContain("add");
+          expect(methodNames).toContain("subtract");
+        });
 
-      it("should extract nullsafe method calls", () => {
-        const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
-        const calls = extractCalls(content, "php");
+        it("should extract nullsafe method calls", () => {
+          const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
+          const calls = extractCalls(content, "php");
 
-        const resetCall = calls.find((c) => c.calleeName === "reset");
-        expect(resetCall).toBeDefined();
-        expect(resetCall!.callType).toBe("Call");
-      });
+          const resetCall = calls.find((c) => c.calleeName === "reset");
+          expect(resetCall).toBeDefined();
+          expect(resetCall!.callType).toBe("MethodCall");
+        });
 
-      it("should extract static method calls", () => {
-        const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
-        const calls = extractCalls(content, "php");
+        it("should extract static method calls", () => {
+          const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
+          const calls = extractCalls(content, "php");
 
-        const createCall = calls.find((c) => c.calleeName === "create");
-        expect(createCall).toBeDefined();
-        expect(createCall!.callType).toBe("Call");
-      });
+          const createCall = calls.find((c) => c.calleeName === "create");
+          expect(createCall).toBeDefined();
+          expect(createCall!.callType).toBe("MethodCall");
+        });
 
     it("should extract method calls", () => {
       const content = fs.readFileSync(path.join(fixturesDir, "method-calls.ts"), "utf-8");
@@ -139,30 +139,30 @@ describe("call-graph", () => {
          const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
          const calls = extractCalls(content, "php");
 
-         const methodCalls = calls.filter((c) => c.callType === "Call");
+         const methodCalls = calls.filter((c) => c.callType === "MethodCall");
          const methodNames = methodCalls.map((c) => c.calleeName);
          expect(methodNames).toContain("validate");
          expect(methodNames).toContain("add");
          expect(methodNames).toContain("subtract");
        });
 
-       it("should extract nullsafe method calls", () => {
+     it("should extract nullsafe method calls", () => {
          const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
          const calls = extractCalls(content, "php");
 
          const resetCall = calls.find((c) => c.calleeName === "reset");
          expect(resetCall).toBeDefined();
-         expect(resetCall!.callType).toBe("Call");
-       });
+         expect(resetCall!.callType).toBe("MethodCall");
+      });
 
-       it("should extract static method calls", () => {
+      it("should extract static method calls", () => {
          const content = fs.readFileSync(path.join(fixturesDir, "php-method-calls.php"), "utf-8");
          const calls = extractCalls(content, "php");
 
          const createCall = calls.find((c) => c.calleeName === "create");
          expect(createCall).toBeDefined();
-         expect(createCall!.callType).toBe("Call");
-       });
+         expect(createCall!.callType).toBe("MethodCall");
+      });
 
       it("should extract constructor calls", () => {
         const content = fs.readFileSync(path.join(fixturesDir, "php-constructors.php"), "utf-8");
